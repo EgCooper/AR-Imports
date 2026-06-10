@@ -11,8 +11,13 @@ if (!uri) {
   throw new Error('DATABASE_URL no está definida en las variables de entorno');
 }
 
+const clientOptions = {
+  serverSelectionTimeoutMS: 10000,
+  autoSelectFamily: false,
+};
+
 const globalForMongo = globalThis;
-const client = globalForMongo.mongoClient ?? new MongoClient(uri);
+const client = globalForMongo.mongoClient ?? new MongoClient(uri, clientOptions);
 
 if (process.env.NODE_ENV !== 'production') {
   globalForMongo.mongoClient = client;
@@ -26,9 +31,23 @@ let db;
  */
 export async function connectDB() {
   if (!db) {
-    await client.connect();
-    db = client.db();
-    console.log(`Conectado a MongoDB: ${db.databaseName}`);
+    try {
+      await client.connect();
+      db = client.db();
+      console.log(`Conectado a MongoDB: ${db.databaseName}`);
+    } catch (error) {
+      const isSslError =
+        error.code === 'ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR' ||
+        error.message?.includes('SSL');
+
+      if (isSslError) {
+        console.error(
+          'Error al conectar con MongoDB: revisa en Atlas → Network Access que tu IP esté permitida (o usa 0.0.0.0/0 en desarrollo) y confirma que el cluster no esté pausado.'
+        );
+      }
+
+      throw error;
+    }
   }
 
   return db;
