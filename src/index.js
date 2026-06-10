@@ -4,6 +4,10 @@ import express from 'express';
 
 import { connectDB } from './config/mongo.js';
 import authRoutes from './routes/authRoutes.js';
+import clientRoutes from './routes/clientRoutes.js';
+import paymentRoutes from './routes/paymentRoutes.js';
+import photoRoutes from './routes/photoRoutes.js';
+import quoteRoutes from './routes/quoteRoutes.js';
 import { sendError, sendSuccess } from './utils/apiResponse.js';
 
 dotenv.config();
@@ -14,6 +18,10 @@ const PORT = process.env.PORT || 3001;
 app.use(express.json());
 app.use(cors());
 app.use('/api/auth', authRoutes);
+app.use('/api/clients', clientRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/quotes', quoteRoutes);
+app.use('/api/photos', photoRoutes);
 
 app.get('/api/health', (req, res) => {
   sendSuccess(res, 200, { message: 'Servidor operativo' });
