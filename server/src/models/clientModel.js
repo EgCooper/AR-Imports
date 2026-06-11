@@ -31,6 +31,7 @@ export async function createClient(clientData) {
   const nuevoCliente = {
     nombreCompleto: clientData.nombreCompleto,
     telefono: clientData.telefono,
+    vehiculo: clientData.vehiculo?.trim() || null,
     vin: clientData.vin,
     lote: clientData.lote,
     fotoAutoUrl: clientData.fotoAutoUrl ?? null,

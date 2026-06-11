@@ -21,7 +21,7 @@ async function getQuotesCollection() {
 function mapQuoteData(quoteData) {
   return {
     totalVehiculo: Number(quoteData.totalVehiculo),
-    datosVehiculo: Number(quoteData.datosVehiculo),
+    datosVehiculo: String(quoteData.datosVehiculo ?? '').trim(),
     fees: Number(quoteData.fees),
     tarifaUsa: Number(quoteData.tarifaUsa),
     transferenciaDineroUsa: Number(quoteData.transferenciaDineroUsa),
@@ -35,6 +35,10 @@ function mapQuoteData(quoteData) {
     repuestos: Number(quoteData.repuestos),
     poliza: Number(quoteData.poliza),
     tramitesAduana: Number(quoteData.tramitesAduana),
+    marca: quoteData.marca?.trim() || null,
+    modelo: quoteData.modelo?.trim() || null,
+    ano: quoteData.ano ? Number(quoteData.ano) : null,
+    tipoVehiculo: quoteData.tipoVehiculo || null,
   };
 }
 
@@ -73,4 +77,77 @@ export async function findQuoteByClientId(clientId) {
   const collection = await getQuotesCollection();
 
   return collection.findOne({ clienteId: new ObjectId(clientId) });
+}
+
+/**
+ * Busca una cotización por su identificador de documento.
+ * @param {string} quoteId - Identificador de la cotización.
+ * @returns {Promise<object|null>} Documento de la cotización o null.
+ */
+export async function findQuoteById(quoteId) {
+  const collection = await getQuotesCollection();
+  return collection.findOne({ _id: new ObjectId(quoteId) });
+}
+
+/**
+ * Lista todas las cotizaciones con datos del cliente asociado (si existe).
+ * @returns {Promise<object[]>} Cotizaciones ordenadas por fecha de creación descendente.
+ */
+export async function findAllQuotes() {
+  const collection = await getQuotesCollection();
+
+  return collection
+    .aggregate([
+      {
+        $lookup: {
+          from: 'Cliente',
+          localField: 'clienteId',
+          foreignField: '_id',
+          as: 'cliente',
+        },
+      },
+      { $unwind: { path: '$cliente', preserveNullAndEmptyArrays: true } },
+      { $sort: { fechaCreacion: -1 } },
+    ])
+    .toArray();
+}
+
+/**
+ * Crea una cotización independiente (sin cliente obligatorio).
+ * @param {object} quoteData - Datos financieros de la cotización.
+ * @param {string|null} [clientId] - Cliente opcional al que vincular la cotización.
+ * @returns {Promise<import('mongodb').InsertOneResult>} Resultado de la inserción.
+ */
+export async function createQuote(quoteData, clientId = null) {
+  const collection = await getQuotesCollection();
+  const mappedData = mapQuoteData(quoteData);
+
+  const document = {
+    ...mappedData,
+    fechaCreacion: new Date(),
+  };
+
+  if (clientId) {
+    document.clienteId = new ObjectId(clientId);
+  }
+
+  return collection.insertOne(document);
+}
+
+/**
+ * Actualiza una cotización existente por su identificador de documento.
+ * @param {string} quoteId - Identificador de la cotización.
+ * @param {object} quoteData - Datos financieros actualizados.
+ * @returns {Promise<import('mongodb').UpdateResult|null>} Resultado o null si no existe.
+ */
+export async function updateQuoteById(quoteId, quoteData) {
+  const collection = await getQuotesCollection();
+  const mappedData = mapQuoteData(quoteData);
+
+  const result = await collection.updateOne(
+    { _id: new ObjectId(quoteId) },
+    { $set: mappedData }
+  );
+
+  return result.matchedCount > 0 ? result : null;
 }

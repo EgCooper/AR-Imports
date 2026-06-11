@@ -20,10 +20,51 @@ function normalizeClientId(rawId) {
 }
 
 /**
+ * Sube archivos de imagen del vehículo y devuelve las URLs públicas.
+ */
+export async function uploadVehicleFiles(req, res) {
+  try {
+    if (!req.files?.length) {
+      return sendError(res, 400, 'Debes seleccionar al menos una imagen');
+    }
+
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const urls = req.files.map((file) => `${baseUrl}/uploads/vehicles/${file.filename}`);
+
+    return sendSuccess(res, 201, {
+      message: `${urls.length} imagen(es) subida(s) correctamente`,
+      urls,
+    });
+  } catch (error) {
+    console.error('Error en uploadVehicleFiles:', error.message);
+    return sendError(res, 500, 'Error interno al subir las imágenes');
+  }
+}
+
+/**
+ * Sube la captura de comprobante de depósito y devuelve la URL pública.
+ */
+export async function uploadComprobanteFile(req, res) {
+  try {
+    if (!req.file) {
+      return sendError(res, 400, 'Debes seleccionar una imagen de comprobante');
+    }
+
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const url = `${baseUrl}/uploads/comprobantes/${req.file.filename}`;
+
+    return sendSuccess(res, 201, {
+      message: 'Comprobante subido correctamente',
+      url,
+    });
+  } catch (error) {
+    console.error('Error en uploadComprobanteFile:', error.message);
+    return sendError(res, 500, 'Error interno al subir el comprobante');
+  }
+}
+
+/**
  * Registra una nueva foto en el historial logístico de un cliente.
- * @param {import('express').Request} req - Petición con clienteId, estadoAlMomento y fotoUrl.
- * @param {import('express').Response} res - Respuesta HTTP.
- * @returns {Promise<import('express').Response>}
  */
 export async function uploadPhotoRecord(req, res) {
   try {
