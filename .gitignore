@@ -48,3 +48,6 @@ desktop.ini
 tmp/
 temp/
 *.tmp
+
+# Imágenes subidas por usuarios
+server/uploads/

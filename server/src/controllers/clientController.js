@@ -6,7 +6,7 @@ import {
 } from '../models/clientModel.js';
 import { sendError, sendSuccess } from '../utils/apiResponse.js';
 
-const ESTADOS_VALIDOS = ['USA', 'CHILE', 'ADUANA_BOLIVIA', 'TALLER'];
+const ESTADOS_VALIDOS = ['USA', 'CHILE', 'ADUANA_BOLIVIA', 'BOLIVIA', 'TALLER'];
 
 /**
  * Registra un nuevo cliente con su vehículo asociado.
@@ -19,6 +19,7 @@ export async function registerClient(req, res) {
     const {
       nombreCompleto,
       telefono,
+      vehiculo,
       vin,
       lote,
       fotoAutoUrl,
@@ -41,6 +42,7 @@ export async function registerClient(req, res) {
     const resultado = await createClient({
       nombreCompleto,
       telefono,
+      vehiculo,
       vin,
       lote,
       fotoAutoUrl,
@@ -52,6 +54,7 @@ export async function registerClient(req, res) {
       id: resultado.insertedId.toString(),
       nombreCompleto,
       telefono,
+      vehiculo: vehiculo ?? null,
       vin,
       lote,
       fotoAutoUrl: fotoAutoUrl ?? null,

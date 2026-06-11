@@ -8,7 +8,7 @@ const COLLECTION_NAME = 'fotos_logistica';
  * Estados logísticos válidos del vehículo.
  * @type {string[]}
  */
-export const ESTADOS_VALIDOS = ['USA', 'CHILE', 'ADUANA_BOLIVIA', 'TALLER'];
+export const ESTADOS_VALIDOS = ['USA', 'CHILE', 'ADUANA_BOLIVIA', 'BOLIVIA', 'TALLER'];
 
 /**
  * Obtiene la referencia a la colección de fotos logísticas.
