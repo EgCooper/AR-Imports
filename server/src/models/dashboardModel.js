@@ -17,10 +17,13 @@ export async function getDashboardStats() {
     estadosAgg,
     pagosRecientes,
   ] = await Promise.all([
-    clientsCol.countDocuments(),
-    quotesCol.countDocuments(),
+    clientsCol.countDocuments({ archivado: { $ne: true } }),
+    quotesCol.countDocuments({ archivada: { $ne: true } }),
     paymentsCol.distinct('clienteId').then((ids) => ids.length),
-    clientsCol.aggregate([{ $group: { _id: '$estadoAuto', count: { $sum: 1 } } }]).toArray(),
+    clientsCol.aggregate([
+      { $match: { archivado: { $ne: true } } },
+      { $group: { _id: '$estadoAuto', count: { $sum: 1 } } },
+    ]).toArray(),
     paymentsCol
       .aggregate([
         { $sort: { fechaAbono: -1 } },

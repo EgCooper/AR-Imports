@@ -90,8 +90,11 @@ export async function findQuoteById(quoteId) {
  * Lista todas las cotizaciones con datos del cliente asociado (si existe).
  * @returns {Promise<object[]>} Cotizaciones ordenadas por fecha de creación descendente.
  */
-function quotesWithClientPipeline({ skip = 0, limit = null } = {}) {
+function quotesWithClientPipeline({ skip = 0, limit = null, incluirArchivadas = false } = {}) {
+  const matchStage = incluirArchivadas ? {} : { archivada: { $ne: true } };
+
   const pipeline = [
+    { $match: matchStage },
     {
       $lookup: {
         from: 'Cliente',
@@ -117,15 +120,15 @@ export async function findAllQuotes() {
 
 /**
  * Lista cotizaciones con paginación y datos del cliente asociado.
- * @param {{ skip: number, limit: number }} options
- * @returns {Promise<{ quotes: object[], total: number }>}
+ * @param {{ skip: number, limit: number, incluirArchivadas?: boolean }} options
  */
-export async function findQuotesPaginated({ skip, limit }) {
+export async function findQuotesPaginated({ skip, limit, incluirArchivadas = false }) {
   const collection = await getQuotesCollection();
+  const match = incluirArchivadas ? {} : { archivada: { $ne: true } };
 
   const [quotes, total] = await Promise.all([
-    collection.aggregate(quotesWithClientPipeline({ skip, limit })).toArray(),
-    collection.countDocuments(),
+    collection.aggregate(quotesWithClientPipeline({ skip, limit, incluirArchivadas })).toArray(),
+    collection.countDocuments(match),
   ]);
 
   return { quotes, total };
@@ -144,6 +147,8 @@ export async function createQuote(quoteData, clientId = null) {
   const document = {
     ...mappedData,
     fechaCreacion: new Date(),
+    archivada: false,
+    fechaArchivada: null,
   };
 
   if (clientId) {
@@ -164,8 +169,71 @@ export async function updateQuoteById(quoteId, quoteData) {
   const mappedData = mapQuoteData(quoteData);
 
   return collection.findOneAndUpdate(
-    { _id: new ObjectId(quoteId) },
+    { _id: new ObjectId(quoteId), archivada: { $ne: true } },
     { $set: mappedData, $unset: { transferenciaDineroUsa: '' } },
+    { returnDocument: 'after' }
+  );
+}
+
+/**
+ * @param {string} quoteId
+ * @param {string} clientId
+ */
+export async function linkQuoteToClient(quoteId, clientId) {
+  const collection = await getQuotesCollection();
+
+  return collection.findOneAndUpdate(
+    { _id: new ObjectId(quoteId), archivada: { $ne: true } },
+    { $set: { clienteId: new ObjectId(clientId) } },
+    { returnDocument: 'after' }
+  );
+}
+
+/**
+ * @param {string} quoteId
+ */
+export async function unlinkQuoteFromClient(quoteId) {
+  const collection = await getQuotesCollection();
+
+  return collection.findOneAndUpdate(
+    { _id: new ObjectId(quoteId), archivada: { $ne: true } },
+    { $unset: { clienteId: '' } },
+    { returnDocument: 'after' }
+  );
+}
+
+/**
+ * @param {string} quoteId
+ * @param {string} [motivo]
+ */
+export async function archiveQuoteById(quoteId, motivo = null) {
+  const collection = await getQuotesCollection();
+
+  return collection.findOneAndUpdate(
+    { _id: new ObjectId(quoteId), archivada: { $ne: true } },
+    {
+      $set: {
+        archivada: true,
+        fechaArchivada: new Date(),
+        motivoArchivado: motivo?.trim() || null,
+      },
+    },
+    { returnDocument: 'after' }
+  );
+}
+
+/**
+ * @param {string} quoteId
+ */
+export async function restoreQuoteById(quoteId) {
+  const collection = await getQuotesCollection();
+
+  return collection.findOneAndUpdate(
+    { _id: new ObjectId(quoteId), archivada: true },
+    {
+      $set: { archivada: false },
+      $unset: { fechaArchivada: '', motivoArchivado: '' },
+    },
     { returnDocument: 'after' }
   );
 }
@@ -177,4 +245,5 @@ export async function ensureQuoteIndexes() {
   const collection = await getQuotesCollection();
   await collection.createIndex({ clienteId: 1 }, { sparse: true });
   await collection.createIndex({ fechaCreacion: -1 });
+  await collection.createIndex({ archivada: 1, fechaCreacion: -1 });
 }

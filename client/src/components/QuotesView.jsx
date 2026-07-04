@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Archive,
   ArrowLeft,
   CheckCircle2,
   Download,
@@ -9,12 +10,19 @@ import {
   Pencil,
   Plus,
   Save,
+  UserPlus,
   X,
 } from 'lucide-react';
 
 import api from '../services/api.js';
+import { useExchangeRate } from '../context/ExchangeRateContext.jsx';
+import ArchiveQuoteModal from './clients/ArchiveQuoteModal.jsx';
+import ConvertQuoteModal from './clients/ConvertQuoteModal.jsx';
+import { buildQuoteShareText } from '../utils/shareDocument.js';
 import { parseQuotesResponse } from '../utils/paymentSummaries.js';
+import ShareActions from './shared/ShareActions.jsx';
 import { formatDate, formatMoney } from './clients/clientConstants.js';
+import { convertUsdToBob, formatBob } from '../utils/currency.js';
 
 const NUMERIC_FIELDS = [
   'totalVehiculo',
@@ -343,11 +351,43 @@ function SummaryRow({ label, value }) {
   );
 }
 
+function QuoteTotalBlock({ usdAmount, tipoCambioBob, compact = false }) {
+  const bob = tipoCambioBob ? convertUsdToBob(usdAmount, tipoCambioBob) : null;
+
+  if (compact) {
+    return (
+      <div>
+        <p className="text-xl font-bold tabular-nums">{formatMoney(usdAmount)}</p>
+        {bob != null && (
+          <p className="mt-0.5 text-sm font-medium tabular-nums text-slate-300">
+            {formatBob(bob)}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p className="mt-2 text-3xl font-bold tabular-nums">{formatMoney(usdAmount)}</p>
+      {bob != null && (
+        <>
+          <p className="mt-1 text-lg font-semibold tabular-nums text-emerald-300">
+            {formatBob(bob)}
+          </p>
+          <p className="mt-1 text-xs text-slate-400">Tipo de cambio: {tipoCambioBob} Bs/USD</p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function FinancialSummary({
   subtotales,
   granTotal,
   vehicleLabel,
   clientName,
+  tipoCambioBob,
   onDownload,
   onSave,
   saving,
@@ -376,7 +416,7 @@ function FinancialSummary({
 
       <div className="mt-5 rounded-xl bg-[#0a1926] px-5 py-5 text-white">
         <p className="text-xs font-medium uppercase tracking-wide text-slate-300">Total cotización</p>
-        <p className="mt-2 text-3xl font-bold tabular-nums">{formatMoney(granTotal)}</p>
+        <QuoteTotalBlock usdAmount={granTotal} tipoCambioBob={tipoCambioBob} />
       </div>
 
       <div className="mt-6 space-y-3">
@@ -409,10 +449,11 @@ function FinancialSummary({
   );
 }
 
-function QuoteDetailModal({ quote, onClose, onEdit, onDownload }) {
+function QuoteDetailModal({ quote, onClose, onEdit, onDownload, onConvert, tipoCambioBob }) {
   if (!quote) return null;
 
   const vehicleLabel = getQuoteVehicleLabel(quote);
+  const shareText = buildQuoteShareText(quote, tipoCambioBob);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
@@ -470,19 +511,36 @@ function QuoteDetailModal({ quote, onClose, onEdit, onDownload }) {
           </div>
 
           <div className="mt-5 rounded-xl bg-[#0a1926] px-4 py-4 text-white">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
               <span className="text-sm font-medium">Total</span>
-              <span className="text-xl font-bold tabular-nums">
-                {formatMoney(quote.costoTotalCalculado)}
-              </span>
+              <QuoteTotalBlock
+                usdAmount={quote.costoTotalCalculado}
+                tipoCambioBob={tipoCambioBob}
+                compact
+              />
             </div>
           </div>
+
+          <ShareActions
+            className="mt-5"
+            phone={quote.clienteTelefono}
+            email={quote.clienteEmail}
+            whatsappText={shareText}
+            emailSubject={`Cotización ${vehicleLabel} — ARR-Imports`}
+            emailBody={shareText}
+          />
         </div>
 
         <div className="flex flex-col-reverse gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} className="app-btn-secondary min-h-11">
             Cerrar
           </button>
+          {!quote.clienteId && onConvert && (
+            <button type="button" onClick={onConvert} className="app-btn-secondary min-h-11 gap-2">
+              <UserPlus className="h-4 w-4" />
+              Convertir en cliente
+            </button>
+          )}
           <button type="button" onClick={onDownload} className="app-btn-secondary min-h-11 gap-2">
             <Download className="h-4 w-4" />
             PDF
@@ -497,7 +555,7 @@ function QuoteDetailModal({ quote, onClose, onEdit, onDownload }) {
   );
 }
 
-function QuotesListPanel({ quotes, loading, pagination, onPageChange, onView, onEdit, onDownload, onNew }) {
+function QuotesListPanel({ quotes, loading, pagination, onPageChange, onView, onEdit, onDownload, onConvert, onArchive, onNew }) {
   if (loading) {
     return (
       <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-slate-200 bg-white">
@@ -574,6 +632,24 @@ function QuotesListPanel({ quotes, loading, pagination, onPageChange, onView, on
                     >
                       <Download className="h-4 w-4" />
                     </button>
+                    {!quote.clienteId && (
+                      <button
+                        type="button"
+                        onClick={() => onConvert?.(quote)}
+                        title="Convertir en cliente"
+                        className="rounded-lg p-2 text-slate-500 transition hover:bg-emerald-50 hover:text-emerald-700"
+                      >
+                        <UserPlus className="h-4 w-4" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onArchive?.(quote)}
+                      title="Archivar"
+                      className="rounded-lg p-2 text-slate-500 transition hover:bg-amber-50 hover:text-amber-700"
+                    >
+                      <Archive className="h-4 w-4" />
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -627,6 +703,7 @@ function SuccessToast({ message, onClose }) {
 
 /** Gestión de cotizaciones: listar, ver, crear y editar. */
 export default function QuotesView() {
+  const { tipoCambioBob } = useExchangeRate();
   const [screen, setScreen] = useState('list');
   const [formMode, setFormMode] = useState('create');
   const [form, setForm] = useState({ ...FORM_INICIAL });
@@ -641,6 +718,16 @@ export default function QuotesView() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [detailQuote, setDetailQuote] = useState(null);
+
+  const [convertModalOpen, setConvertModalOpen] = useState(false);
+  const [convertingQuote, setConvertingQuote] = useState(null);
+  const [submittingConvert, setSubmittingConvert] = useState(false);
+  const [convertModalError, setConvertModalError] = useState('');
+
+  const [archiveModalOpen, setArchiveModalOpen] = useState(false);
+  const [archivingQuote, setArchivingQuote] = useState(null);
+  const [submittingArchive, setSubmittingArchive] = useState(false);
+  const [archiveModalError, setArchiveModalError] = useState('');
 
   const vehicleLabel = useMemo(() => buildVehicleLabel(form), [form]);
   const readOnly = formMode === 'view';
@@ -737,7 +824,59 @@ export default function QuotesView() {
     const total = quoteOverride?.costoTotalCalculado ?? granTotal;
     const name = quoteOverride?.clienteNombre ?? clientName;
     const { downloadQuotePdf } = await import('../utils/exportQuotePdf.js');
-    downloadQuotePdf(quoteToForm(source), total, name);
+    downloadQuotePdf(quoteToForm(source), total, name, tipoCambioBob);
+  };
+
+  const openConvertModal = (quote) => {
+    setConvertingQuote(quote);
+    setConvertModalError('');
+    setConvertModalOpen(true);
+    setDetailQuote(null);
+  };
+
+  const handleConvertToClient = async (formData) => {
+    if (!convertingQuote?.id) return;
+    setSubmittingConvert(true);
+    setConvertModalError('');
+    try {
+      const response = await api.post(`/quotes/item/${convertingQuote.id}/convert-to-client`, formData);
+      if (response.data.success) {
+        setConvertModalOpen(false);
+        setConvertingQuote(null);
+        setToast('Cliente registrado y cotización vinculada.');
+        await loadQuotes(quotesPage);
+      }
+    } catch (err) {
+      setConvertModalError(err.response?.data?.message || 'No se pudo convertir la cotización.');
+    } finally {
+      setSubmittingConvert(false);
+    }
+  };
+
+  const openArchiveQuoteModal = (quote) => {
+    setArchivingQuote(quote);
+    setArchiveModalError('');
+    setArchiveModalOpen(true);
+    setDetailQuote(null);
+  };
+
+  const handleArchiveQuote = async ({ motivo }) => {
+    if (!archivingQuote?.id) return;
+    setSubmittingArchive(true);
+    setArchiveModalError('');
+    try {
+      const response = await api.post(`/quotes/item/${archivingQuote.id}/archive`, { motivo });
+      if (response.data.success) {
+        setArchiveModalOpen(false);
+        setArchivingQuote(null);
+        setToast('Cotización archivada.');
+        await loadQuotes(quotesPage);
+      }
+    } catch (err) {
+      setArchiveModalError(err.response?.data?.message || 'No se pudo archivar la cotización.');
+    } finally {
+      setSubmittingArchive(false);
+    }
   };
 
   const handleSave = async () => {
@@ -817,6 +956,8 @@ export default function QuotesView() {
           onView={openView}
           onEdit={openEdit}
           onDownload={handleDownloadPdf}
+          onConvert={openConvertModal}
+          onArchive={openArchiveQuoteModal}
           onNew={openCreate}
         />
       ) : (
@@ -848,6 +989,7 @@ export default function QuotesView() {
               granTotal={granTotal}
               vehicleLabel={vehicleLabel}
               clientName={clientName}
+              tipoCambioBob={tipoCambioBob}
               onDownload={() => handleDownloadPdf()}
               onSave={handleSave}
               saving={saving}
@@ -861,11 +1003,31 @@ export default function QuotesView() {
 
       <QuoteDetailModal
         quote={detailQuote}
+        tipoCambioBob={tipoCambioBob}
         onClose={() => setDetailQuote(null)}
         onEdit={() => {
           openEdit(detailQuote);
         }}
         onDownload={() => handleDownloadPdf(detailQuote)}
+        onConvert={() => openConvertModal(detailQuote)}
+      />
+
+      <ConvertQuoteModal
+        open={convertModalOpen}
+        quote={convertingQuote}
+        onClose={() => { setConvertModalOpen(false); setConvertingQuote(null); }}
+        onSubmit={handleConvertToClient}
+        submitting={submittingConvert}
+        error={convertModalError}
+      />
+
+      <ArchiveQuoteModal
+        open={archiveModalOpen}
+        quote={archivingQuote}
+        onClose={() => { setArchiveModalOpen(false); setArchivingQuote(null); }}
+        onSubmit={handleArchiveQuote}
+        submitting={submittingArchive}
+        error={archiveModalError}
       />
 
       {toast && <SuccessToast message={toast} onClose={() => setToast('')} />}

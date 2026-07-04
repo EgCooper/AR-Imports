@@ -11,12 +11,17 @@ import {
   Wallet,
 } from 'lucide-react';
 
+import { useExchangeRate } from '../context/ExchangeRateContext.jsx';
 import api from '../services/api.js';
 import { uploadComprobantePhoto } from '../services/uploadPhotos.js';
+import { formatDualMoney } from '../utils/currency.js';
+import { downloadCsvExport } from '../utils/exportCsv.js';
 import { parseClientsResponse, summariesMapFromClients } from '../utils/paymentSummaries.js';
+import EditPaymentModal from './clients/EditPaymentModal.jsx';
 import PaymentHistoryPanel from './clients/PaymentHistoryPanel.jsx';
 import RegisterPaymentModal from './clients/RegisterPaymentModal.jsx';
-import { formatMoney, getVehicleLabel } from './clients/clientConstants.js';
+import VoidPaymentModal from './clients/VoidPaymentModal.jsx';
+import { getVehicleLabel } from './clients/clientConstants.js';
 
 function ClientSelector({
   clients,
@@ -103,14 +108,14 @@ function ClientSelector({
   );
 }
 
-function FinancialKPIs({ resumen }) {
+function FinancialKPIs({ resumen, tipoCambioBob }) {
   const { costoTotalPactado, totalPagado, saldoPendiente } = resumen;
   const liquidado = saldoPendiente <= 0;
 
   const cards = [
     {
       label: 'Costo pactado',
-      value: formatMoney(costoTotalPactado),
+      value: formatDualMoney(costoTotalPactado, tipoCambioBob),
       icon: DollarSign,
       className: 'border-slate-200 bg-white text-slate-900',
       iconClass: 'bg-slate-100 text-slate-600',
@@ -118,7 +123,7 @@ function FinancialKPIs({ resumen }) {
     },
     {
       label: 'Total abonado',
-      value: formatMoney(totalPagado),
+      value: formatDualMoney(totalPagado, tipoCambioBob),
       icon: Wallet,
       className: 'border-slate-200 bg-white text-slate-900',
       iconClass: 'bg-emerald-50 text-emerald-700',
@@ -126,7 +131,7 @@ function FinancialKPIs({ resumen }) {
     },
     {
       label: liquidado ? 'Cuenta liquidada' : 'Saldo pendiente',
-      value: liquidado ? 'Liquidado' : formatMoney(saldoPendiente),
+      value: liquidado ? 'Liquidado' : formatDualMoney(saldoPendiente, tipoCambioBob),
       icon: liquidado ? CheckCircle2 : TrendingDown,
       className: 'border-[#0a1926] bg-[#0a1926] text-white',
       iconClass: 'bg-white/15 text-white',
@@ -155,7 +160,7 @@ function FinancialKPIs({ resumen }) {
   );
 }
 
-function SelectedClientBanner({ client, summary }) {
+function SelectedClientBanner({ client, summary, tipoCambioBob }) {
   if (!client) return null;
 
   const saldo = summary?.resumenFinanciero?.saldoPendiente ?? 0;
@@ -171,7 +176,7 @@ function SelectedClientBanner({ client, summary }) {
         <div className="text-left sm:text-right">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Saldo pendiente</p>
           <p className={`mt-1 text-2xl font-bold tabular-nums ${saldo > 0 ? 'text-slate-900' : 'text-emerald-600'}`}>
-            {saldo > 0 ? formatMoney(saldo) : 'Liquidado'}
+            {saldo > 0 ? formatDualMoney(saldo, tipoCambioBob) : 'Liquidado'}
           </p>
         </div>
       </div>
@@ -183,6 +188,7 @@ function SelectedClientBanner({ client, summary }) {
 const CLIENTS_PAGE_SIZE = 50;
 
 export default function PaymentsView() {
+  const { tipoCambioBob } = useExchangeRate();
   const [searchParams] = useSearchParams();
   const [clients, setClients] = useState([]);
   const [summaries, setSummaries] = useState({});
@@ -201,6 +207,17 @@ export default function PaymentsView() {
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [paymentModalError, setPaymentModalError] = useState('');
+
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingPayment, setEditingPayment] = useState(null);
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+  const [editModalError, setEditModalError] = useState('');
+
+  const [voidModalOpen, setVoidModalOpen] = useState(false);
+  const [voidingPayment, setVoidingPayment] = useState(null);
+  const [submittingVoid, setSubmittingVoid] = useState(false);
+  const [voidModalError, setVoidModalError] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   const clienteFromUrl = searchParams.get('cliente');
 
@@ -348,6 +365,74 @@ export default function PaymentsView() {
     setPaymentModalOpen(true);
   };
 
+  const handleEditPayment = (pago) => {
+    setEditModalError('');
+    setEditingPayment(pago);
+    setEditModalOpen(true);
+  };
+
+  const handleSubmitEdit = async (formData) => {
+    if (!editingPayment?.id) return;
+    setSubmittingEdit(true);
+    setEditModalError('');
+    try {
+      const response = await api.patch(`/payments/${editingPayment.id}`, formData);
+      if (response.data.success) {
+        setEditModalOpen(false);
+        setEditingPayment(null);
+        setSuccess('Abono actualizado correctamente.');
+        await fetchSummary(selectedClientId);
+        await fetchClients(clientsPage, debouncedSearch);
+      }
+    } catch (err) {
+      setEditModalError(err.response?.data?.message || 'No se pudo actualizar el abono.');
+    } finally {
+      setSubmittingEdit(false);
+    }
+  };
+
+  const handleVoidPayment = (pago) => {
+    setVoidModalError('');
+    setVoidingPayment(pago);
+    setVoidModalOpen(true);
+  };
+
+  const handleSubmitVoid = async ({ motivo }) => {
+    if (!voidingPayment?.id) return;
+    setSubmittingVoid(true);
+    setVoidModalError('');
+    try {
+      const response = await api.post(`/payments/${voidingPayment.id}/void`, { motivo });
+      if (response.data.success) {
+        setVoidModalOpen(false);
+        setVoidingPayment(null);
+        setSuccess('Abono anulado correctamente.');
+        await fetchSummary(selectedClientId);
+        await fetchClients(clientsPage, debouncedSearch);
+      }
+    } catch (err) {
+      setVoidModalError(err.response?.data?.message || 'No se pudo anular el abono.');
+    } finally {
+      setSubmittingVoid(false);
+    }
+  };
+
+  const handleExportPayments = async () => {
+    if (!selectedClientId) return;
+    setExporting(true);
+    try {
+      await downloadCsvExport(
+        '/payments/export.csv',
+        `pagos-${selectedClient?.lote ?? selectedClientId}.csv`,
+        { clientId: selectedClientId }
+      );
+    } catch (err) {
+      setError(err.response?.data?.message || 'No se pudo exportar el historial.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -421,15 +506,19 @@ export default function PaymentsView() {
         </div>
       ) : (
         <div className="space-y-6">
-          <SelectedClientBanner client={selectedClient} summary={summary} />
+          <SelectedClientBanner client={selectedClient} summary={summary} tipoCambioBob={tipoCambioBob} />
 
           {summary?.resumenFinanciero && (
-            <FinancialKPIs resumen={summary.resumenFinanciero} />
+            <FinancialKPIs resumen={summary.resumenFinanciero} tipoCambioBob={tipoCambioBob} />
           )}
 
           <PaymentHistoryPanel
             historial={summary?.historialAbonos}
             loading={summaryLoading}
+            onEdit={handleEditPayment}
+            onVoid={handleVoidPayment}
+            onExport={handleExportPayments}
+            exporting={exporting}
           />
         </div>
       )}
@@ -443,6 +532,24 @@ export default function PaymentsView() {
         onSubmit={handleRegisterPayment}
         submitting={submittingPayment}
         error={paymentModalError}
+      />
+
+      <EditPaymentModal
+        open={editModalOpen}
+        payment={editingPayment}
+        onClose={() => { setEditModalOpen(false); setEditingPayment(null); }}
+        onSubmit={handleSubmitEdit}
+        submitting={submittingEdit}
+        error={editModalError}
+      />
+
+      <VoidPaymentModal
+        open={voidModalOpen}
+        payment={voidingPayment}
+        onClose={() => { setVoidModalOpen(false); setVoidingPayment(null); setVoidModalError(''); }}
+        onSubmit={handleSubmitVoid}
+        submitting={submittingVoid}
+        error={voidModalError}
       />
     </div>
   );

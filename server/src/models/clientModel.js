@@ -38,6 +38,12 @@ export async function createClient(clientData) {
     costoTotalPactado: clientData.costoTotalPactado,
     estadoAuto: clientData.estadoAuto ?? 'USA',
     fechaRegistro: new Date(),
+    archivado: false,
+    fechaArchivado: null,
+    motivoArchivado: null,
+    cotizacionOrigenId: clientData.cotizacionOrigenId
+      ? new ObjectId(clientData.cotizacionOrigenId)
+      : null,
   };
 
   return collection.insertOne(nuevoCliente);
@@ -62,21 +68,54 @@ function buildSearchFilter(search) {
 
   const regex = { $regex: term, $options: 'i' };
   return {
-    $or: [{ nombreCompleto: regex }, { vin: regex }, { lote: regex }, { vehiculo: regex }],
+    $or: [
+      { nombreCompleto: regex },
+      { telefono: regex },
+      { vin: regex },
+      { lote: regex },
+      { vehiculo: regex },
+    ],
+  };
+}
+
+/**
+ * @param {string|undefined} fechaDesde ISO date string YYYY-MM-DD
+ * @param {string|undefined} fechaHasta ISO date string YYYY-MM-DD
+ */
+function buildDateFilter(fechaDesde, fechaHasta) {
+  if (!fechaDesde && !fechaHasta) return {};
+
+  const range = {};
+  if (fechaDesde) {
+    range.$gte = new Date(`${fechaDesde}T00:00:00.000Z`);
+  }
+  if (fechaHasta) {
+    range.$lte = new Date(`${fechaHasta}T23:59:59.999Z`);
+  }
+
+  return { fechaRegistro: range };
+}
+
+/**
+ * @param {{ estadoAuto?: string, search?: string, fechaDesde?: string, fechaHasta?: string, incluirArchivados?: boolean }} filters
+ */
+export function buildClientFilter({ estadoAuto, search, fechaDesde, fechaHasta, incluirArchivados = false }) {
+  return {
+    ...(incluirArchivados ? {} : { archivado: { $ne: true } }),
+    ...(estadoAuto ? { estadoAuto } : {}),
+    ...buildSearchFilter(search),
+    ...buildDateFilter(fechaDesde, fechaHasta),
   };
 }
 
 /**
  * Lista clientes con paginación, filtro opcional por estado y búsqueda.
- * @param {{ skip: number, limit: number, estadoAuto?: string, search?: string }} options
+ * @param {{ skip: number, limit: number, estadoAuto?: string, search?: string, fechaDesde?: string, fechaHasta?: string, incluirArchivados?: boolean }} options
  * @returns {Promise<{ clients: object[], total: number }>}
  */
-export async function findClientsPaginated({ skip, limit, estadoAuto, search }) {
+export async function findClientsPaginated({ skip, limit, estadoAuto, search, fechaDesde, fechaHasta, incluirArchivados }) {
   const collection = await getClientsCollection();
-  const filter = {
-    ...(estadoAuto ? { estadoAuto } : {}),
-    ...buildSearchFilter(search),
-  };
+  const filter = buildClientFilter({ estadoAuto, search, fechaDesde, fechaHasta, incluirArchivados });
 
   const [clients, total] = await Promise.all([
     collection.find(filter).sort({ fechaRegistro: -1 }).skip(skip).limit(limit).toArray(),
@@ -87,6 +126,18 @@ export async function findClientsPaginated({ skip, limit, estadoAuto, search }) 
 }
 
 /**
+ * Lista clientes sin paginación para exportación (máximo 10 000).
+ * @param {object} filters
+ * @returns {Promise<object[]>}
+ */
+export async function findClientsForExport(filters, maxRows = 10_000) {
+  const collection = await getClientsCollection();
+  const filter = buildClientFilter(filters);
+
+  return collection.find(filter).sort({ fechaRegistro: -1 }).limit(maxRows).toArray();
+}
+
+/**
  * Crea índices para consultas frecuentes sobre clientes.
  */
 export async function ensureClientIndexes() {
@@ -94,6 +145,7 @@ export async function ensureClientIndexes() {
   await collection.createIndex({ estadoAuto: 1, fechaRegistro: -1 });
   await collection.createIndex({ vin: 1 });
   await collection.createIndex({ fechaRegistro: -1 });
+  await collection.createIndex({ archivado: 1, fechaRegistro: -1 });
 }
 
 /**
@@ -115,8 +167,73 @@ export async function findClientById(id) {
 export async function updateClientStatus(id, newStatus) {
   const collection = await getClientsCollection();
 
-  return collection.updateOne(
-    { _id: new ObjectId(id) },
-    { $set: { estadoAuto: newStatus } }
+  return collection.findOneAndUpdate(
+    { _id: new ObjectId(id), archivado: { $ne: true } },
+    { $set: { estadoAuto: newStatus, updatedAt: new Date() } },
+    { returnDocument: 'before' }
+  );
+}
+
+/**
+ * @param {string} id
+ * @param {object} fields
+ */
+export async function updateClientById(id, fields) {
+  const collection = await getClientsCollection();
+
+  const update = {
+    nombreCompleto: fields.nombreCompleto,
+    telefono: fields.telefono,
+    vehiculo: fields.vehiculo?.trim() || null,
+    vin: fields.vin,
+    lote: fields.lote,
+    costoTotalPactado: fields.costoTotalPactado,
+    updatedAt: new Date(),
+  };
+
+  if (fields.fotoAutoUrl !== undefined) {
+    update.fotoAutoUrl = fields.fotoAutoUrl;
+  }
+
+  return collection.findOneAndUpdate(
+    { _id: new ObjectId(id), archivado: { $ne: true } },
+    { $set: update },
+    { returnDocument: 'after' }
+  );
+}
+
+/**
+ * @param {string} id
+ * @param {string} [motivo]
+ */
+export async function archiveClientById(id, motivo = null) {
+  const collection = await getClientsCollection();
+
+  return collection.findOneAndUpdate(
+    { _id: new ObjectId(id), archivado: { $ne: true } },
+    {
+      $set: {
+        archivado: true,
+        fechaArchivado: new Date(),
+        motivoArchivado: motivo?.trim() || null,
+      },
+    },
+    { returnDocument: 'after' }
+  );
+}
+
+/**
+ * @param {string} id
+ */
+export async function restoreClientById(id) {
+  const collection = await getClientsCollection();
+
+  return collection.findOneAndUpdate(
+    { _id: new ObjectId(id), archivado: true },
+    {
+      $set: { archivado: false },
+      $unset: { fechaArchivado: '', motivoArchivado: '' },
+    },
+    { returnDocument: 'after' }
   );
 }

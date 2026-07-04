@@ -101,23 +101,46 @@ function VehiclePhotoUpload({ photos, onAdd, onRemove, disabled }) {
   );
 }
 
-export default function RegisterClientModal({ open, onClose, onSubmit, submitting, error }) {
+export default function RegisterClientModal({
+  open,
+  onClose,
+  onSubmit,
+  submitting,
+  error,
+  mode = 'create',
+  client = null,
+}) {
   const [form, setForm] = useState({ ...FORM_INICIAL });
   const [photos, setPhotos] = useState([]);
+  const isEdit = mode === 'edit';
 
   useEffect(() => {
-    if (open) {
-      setForm({ ...FORM_INICIAL });
+    if (!open) {
+      setPhotos((prev) => {
+        prev.forEach((p) => URL.revokeObjectURL(p.preview));
+        return [];
+      });
+      return undefined;
+    }
+
+    if (isEdit && client) {
+      setForm({
+        nombreCompleto: client.nombreCompleto ?? '',
+        telefono: client.telefono ?? '',
+        vehiculo: client.vehiculo ?? '',
+        vin: client.vin ?? '',
+        lote: client.lote ?? '',
+        costoTotalPactado: String(client.costoTotalPactado ?? ''),
+        estadoAuto: client.estadoAuto ?? 'USA',
+      });
       setPhotos([]);
       return undefined;
     }
 
-    setPhotos((prev) => {
-      prev.forEach((p) => URL.revokeObjectURL(p.preview));
-      return [];
-    });
+    setForm({ ...FORM_INICIAL });
+    setPhotos([]);
     return undefined;
-  }, [open]);
+  }, [open, isEdit, client]);
 
   if (!open) return null;
 
@@ -143,12 +166,12 @@ export default function RegisterClientModal({ open, onClose, onSubmit, submittin
     onSubmit({
       ...form,
       costoTotalPactado: Number(form.costoTotalPactado),
-      photoFiles: photos.map((p) => p.file),
+      photoFiles: isEdit ? [] : photos.map((p) => p.file),
     });
   };
 
   return (
-    <ModalShell title="Registrar Cliente" onClose={onClose}>
+    <ModalShell title={isEdit ? 'Editar cliente' : 'Registrar Cliente'} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && <AlertError message={error} />}
 
@@ -161,27 +184,35 @@ export default function RegisterClientModal({ open, onClose, onSubmit, submittin
           <Field label="Lote *" name="lote" value={form.lote} onChange={handleChange} required />
         </div>
 
-        <VehiclePhotoUpload
-          photos={photos}
-          onAdd={handleAddPhoto}
-          onRemove={handleRemovePhoto}
-          disabled={submitting}
-        />
+        {!isEdit && (
+          <VehiclePhotoUpload
+            photos={photos}
+            onAdd={handleAddPhoto}
+            onRemove={handleRemovePhoto}
+            disabled={submitting}
+          />
+        )}
 
         <Field label="Costo total pactado (USD) *" name="costoTotalPactado" type="number" min="0" step="0.01" value={form.costoTotalPactado} onChange={handleChange} required />
 
-        <div>
-          <label htmlFor="estadoAuto" className="mb-1.5 block text-sm font-medium text-foreground">
-            Estado del auto *
-          </label>
-          <select id="estadoAuto" name="estadoAuto" value={form.estadoAuto} onChange={handleChange} className="app-input !mt-0 w-full">
-            {ESTADOS_OPCIONES.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </div>
+        {!isEdit && (
+          <div>
+            <label htmlFor="estadoAuto" className="mb-1.5 block text-sm font-medium text-foreground">
+              Estado del auto *
+            </label>
+            <select id="estadoAuto" name="estadoAuto" value={form.estadoAuto} onChange={handleChange} className="app-input !mt-0 w-full">
+              {ESTADOS_OPCIONES.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
-        <ModalActions onClose={onClose} submitting={submitting} submitLabel="Registrar cliente" />
+        <ModalActions
+          onClose={onClose}
+          submitting={submitting}
+          submitLabel={isEdit ? 'Guardar cambios' : 'Registrar cliente'}
+        />
       </form>
     </ModalShell>
   );

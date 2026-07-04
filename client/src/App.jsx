@@ -11,6 +11,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const Clients = lazy(() => import('./pages/Clients.jsx'));
 const Cotizaciones = lazy(() => import('./pages/Cotizaciones.jsx'));
 const RegistrarPago = lazy(() => import('./pages/RegistrarPago.jsx'));
+const Reports = lazy(() => import('./pages/Reports.jsx'));
 
 function PageLoader() {
   return (
@@ -76,6 +77,14 @@ function App() {
             element={
               <Suspense fallback={<PageLoader />}>
                 <RegistrarPago />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/reportes"
+            element={
+              <Suspense fallback={<PageLoader />}>
+                <Reports />
               </Suspense>
             }
           />

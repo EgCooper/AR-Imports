@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 
 import { BRAND_NAME, BRAND_SLUG } from '../constants/brand.js';
+import { convertUsdToBob, formatBob } from './currency.js';
 
 const TIPOS_VEHICULO = {
   AUTO: 'Automóvil',
@@ -180,7 +181,7 @@ function drawSection(doc, section, form, y) {
  * PDF de cotización en una sola página A4.
  * Listado vertical ampliado: cada sección a ancho completo con un rubro por fila.
  */
-export function downloadQuotePdf(form, granTotal, clientName = '') {
+export function downloadQuotePdf(form, granTotal, clientName = '', tipoCambioBob = null) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   let y = 14;
 
@@ -263,23 +264,27 @@ export function downloadQuotePdf(form, granTotal, clientName = '') {
 
   // ── Total ───────────────────────────────────────────────────
   y += 2;
+  const bobTotal = tipoCambioBob ? convertUsdToBob(granTotal, tipoCambioBob) : null;
+  const totalBarH = bobTotal != null ? 22 : 16;
+
   doc.setFillColor(10, 25, 38);
-  doc.roundedRect(MARGIN_X, y, CONTENT_W, 16, 2, 2, 'F');
+  doc.roundedRect(MARGIN_X, y, CONTENT_W, totalBarH, 2, 2, 'F');
   doc.setFillColor(0, 135, 90);
-  doc.rect(MARGIN_X, y, 3.5, 16, 'F');
+  doc.rect(MARGIN_X, y, 3.5, totalBarH, 'F');
 
   doc.setFontSize(12);
   doc.setFont(undefined, 'bold');
   doc.setTextColor(255, 255, 255);
-  doc.text('TOTAL COTIZACIÓN', MARGIN_X + 8, y + 10.5);
+  doc.text('TOTAL COTIZACIÓN', MARGIN_X + 8, y + (bobTotal != null ? 8 : 10.5));
   doc.setFontSize(16);
-  doc.text(formatMoney(granTotal), RIGHT_X - 5, y + 10.5, { align: 'right' });
+  doc.text(formatMoney(granTotal), RIGHT_X - 5, y + (bobTotal != null ? 8 : 10.5), { align: 'right' });
 
-  // Pie
-  doc.setFontSize(8);
-  doc.setFont(undefined, 'normal');
-  doc.setTextColor(148, 163, 184);
-  doc.text(`Documento generado por ${BRAND_NAME}`, MARGIN_X, 290);
+  if (bobTotal != null) {
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(167, 243, 208);
+    doc.text(`${formatBob(bobTotal)}  ·  TC ${tipoCambioBob} Bs/USD`, MARGIN_X + 8, y + 17);
+  }
 
   doc.save(`cotizacion-${BRAND_SLUG}-${Date.now()}.pdf`);
 }

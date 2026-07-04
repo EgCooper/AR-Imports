@@ -57,6 +57,7 @@ export async function createPayment(paymentData) {
     metodoPago: paymentData.metodoPago,
     comprobanteUrl: paymentData.comprobanteUrl ?? null,
     notas: paymentData.notas ?? null,
+    anulado: false,
   };
 
   return collection.insertOne(nuevoPago);
@@ -77,6 +78,71 @@ export async function findPaymentsByClientId(clientId) {
 }
 
 /**
+ * @param {string} paymentId
+ */
+export async function findPaymentById(paymentId) {
+  const collection = await getPaymentsCollection();
+  return collection.findOne({ _id: new ObjectId(paymentId) });
+}
+
+/**
+ * @param {string} paymentId
+ * @param {object} paymentData
+ */
+export async function updatePaymentById(paymentId, paymentData) {
+  const collection = await getPaymentsCollection();
+
+  const update = {
+    monto: paymentData.monto,
+    fechaAbono: paymentData.fechaAbono ? new Date(paymentData.fechaAbono) : undefined,
+    concepto: paymentData.concepto,
+    metodoPago: paymentData.metodoPago,
+    notas: paymentData.notas ?? null,
+  };
+
+  Object.keys(update).forEach((key) => update[key] === undefined && delete update[key]);
+
+  return collection.findOneAndUpdate(
+    { _id: new ObjectId(paymentId), anulado: { $ne: true } },
+    { $set: update },
+    { returnDocument: 'after' }
+  );
+}
+
+/**
+ * @param {string} paymentId
+ * @param {string} [motivo]
+ */
+export async function voidPaymentById(paymentId, motivo = null) {
+  const collection = await getPaymentsCollection();
+
+  return collection.findOneAndUpdate(
+    { _id: new ObjectId(paymentId), anulado: { $ne: true } },
+    {
+      $set: {
+        anulado: true,
+        fechaAnulacion: new Date(),
+        motivoAnulacion: motivo?.trim() || null,
+      },
+    },
+    { returnDocument: 'after' }
+  );
+}
+
+/**
+ * Pagos activos de un cliente para exportación.
+ * @param {string} clientId
+ */
+export async function findActivePaymentsByClientId(clientId) {
+  const collection = await getPaymentsCollection();
+
+  return collection
+    .find({ clienteId: new ObjectId(clientId), anulado: { $ne: true } })
+    .sort({ fechaAbono: -1 })
+    .toArray();
+}
+
+/**
  * Suma los pagos por cliente en una sola consulta de agregación.
  * @param {string[]} clientIds - Identificadores de clientes.
  * @returns {Promise<Map<string, number>>} Mapa clienteId → total pagado.
@@ -89,7 +155,7 @@ export async function aggregatePaymentTotalsByClientIds(clientIds) {
 
   const rows = await collection
     .aggregate([
-      { $match: { clienteId: { $in: objectIds } } },
+      { $match: { clienteId: { $in: objectIds }, anulado: { $ne: true } } },
       { $group: { _id: '$clienteId', totalPagado: { $sum: '$monto' } } },
     ])
     .toArray();

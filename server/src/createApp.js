@@ -18,6 +18,8 @@ import dashboardRoutes from './routes/dashboardRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import photoRoutes from './routes/photoRoutes.js';
 import quoteRoutes from './routes/quoteRoutes.js';
+import reportsRoutes from './routes/reportsRoutes.js';
+import settingsRoutes from './routes/settingsRoutes.js';
 import { sendError, sendSuccess } from './utils/apiResponse.js';
 import { logger } from './utils/logger.js';
 
@@ -89,6 +91,8 @@ export function createApp() {
   app.use('/api/payments', paymentRoutes);
   app.use('/api/quotes', quoteRoutes);
   app.use('/api/photos', photoRoutes);
+  app.use('/api/settings', settingsRoutes);
+  app.use('/api/reports', reportsRoutes);
 
   app.get('/api/health', (req, res) => {
     sendSuccess(res, 200, {

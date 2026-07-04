@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { CreditCard, FileText, LayoutDashboard, LogOut, Menu, Users, X } from 'lucide-react';
+import { BarChart3, CreditCard, FileText, LayoutDashboard, LogOut, Menu, Users, X } from 'lucide-react';
 
 import { BRAND_LOGO_MARK, BRAND_NAME } from '../constants/brand.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useExchangeRate } from '../context/ExchangeRateContext.jsx';
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/cotizaciones', label: 'Cotizaciones', icon: FileText },
   { to: '/clients', label: 'Clientes', icon: Users },
   { to: '/pagos', label: 'Pagos', icon: CreditCard },
+  { to: '/reportes', label: 'Reportes', icon: BarChart3 },
 ];
 
 function SidebarLink({ to, label, icon: Icon, onNavigate }) {
@@ -29,6 +31,54 @@ function SidebarLink({ to, label, icon: Icon, onNavigate }) {
       <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
       <span>{label}</span>
     </NavLink>
+  );
+}
+
+function ExchangeRateControl() {
+  const { tipoCambioBob, updateRate, loading } = useExchangeRate();
+  const [value, setValue] = useState('6.96');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!loading) setValue(String(tipoCambioBob));
+  }, [tipoCambioBob, loading]);
+
+  const handleSave = async () => {
+    const next = Number(value);
+    if (!Number.isFinite(next) || next <= 0) return;
+    setSaving(true);
+    try {
+      await updateRate(next);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="border-t border-white/10 px-4 py-4">
+      <label htmlFor="tipo-cambio" className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+        Tipo de cambio (USD → BOB)
+      </label>
+      <div className="flex gap-2">
+        <input
+          id="tipo-cambio"
+          type="number"
+          min="0.01"
+          step="0.01"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="min-h-10 w-full rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-white outline-none focus:border-emerald-500"
+        />
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || loading}
+          className="shrink-0 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+        >
+          {saving ? '...' : 'OK'}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -54,6 +104,8 @@ function SidebarContent({ user, onLogout, onNavigate }) {
           <SidebarLink key={item.to} {...item} onNavigate={onNavigate} />
         ))}
       </nav>
+
+      <ExchangeRateControl />
 
       <div className="border-t border-white/10 p-3">
         <button

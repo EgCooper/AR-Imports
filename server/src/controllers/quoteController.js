@@ -1,11 +1,16 @@
-import { findClientById } from '../models/clientModel.js';
+import { createClient, findClientById } from '../models/clientModel.js';
+import { addEstadoHistorialEntry } from '../models/estadoHistorialModel.js';
 import {
+  archiveQuoteById,
   createOrUpdateQuote,
   createQuote,
   findAllQuotes,
   findQuoteByClientId,
   findQuoteById,
   findQuotesPaginated,
+  linkQuoteToClient,
+  restoreQuoteById,
+  unlinkQuoteFromClient,
   updateQuoteById,
 } from '../models/quoteModel.js';
 import { logger } from '../utils/logger.js';
@@ -103,6 +108,7 @@ function mapQuoteResponse(cotizacion, cliente = null) {
     ano: cotizacion.ano,
     tipoVehiculo: cotizacion.tipoVehiculo,
     fechaCreacion: cotizacion.fechaCreacion,
+    archivada: Boolean(cotizacion.archivada),
     costoTotalCalculado: calculateTotalCost(cotizacion),
     ...amounts,
   };
@@ -328,5 +334,190 @@ export async function getQuoteByClient(req, res) {
     });
   } catch (_error) {
     return sendError(res, 400, 'No se pudo obtener la cotización. Verifique el identificador');
+  }
+}
+
+/**
+ * Vincula una cotización a un cliente existente (F8).
+ */
+export async function linkQuoteToClientHandler(req, res) {
+  try {
+    const quoteId = normalizeQuoteId(req.params.quoteId);
+    const clientId = normalizeClientId(req.body.clienteId);
+
+    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inválido');
+    if (!clientId) return sendError(res, 400, 'Identificador de cliente inválido');
+
+    const cotizacion = await findQuoteById(quoteId);
+    if (!cotizacion || cotizacion.archivada) {
+      return sendError(res, 404, 'Cotización no encontrada');
+    }
+
+    const cliente = await findClientById(clientId);
+    if (!cliente || cliente.archivado) {
+      return sendError(res, 404, 'Cliente no encontrado');
+    }
+
+    const existing = await findQuoteByClientId(clientId);
+    if (existing && existing._id.toString() !== quoteId) {
+      return sendError(res, 409, 'Este cliente ya tiene otra cotización vinculada');
+    }
+
+    const updated = await linkQuoteToClient(quoteId, clientId);
+    return sendSuccess(res, 200, {
+      message: 'Cotización vinculada al cliente',
+      cotizacion: mapQuoteResponse(updated, cliente),
+    });
+  } catch (error) {
+    logger.error({ err: error }, 'Error en linkQuoteToClientHandler');
+    return sendError(res, 500, 'No se pudo vincular la cotización');
+  }
+}
+
+/**
+ * Desvincula una cotización de su cliente (F8).
+ */
+export async function unlinkQuoteHandler(req, res) {
+  try {
+    const quoteId = normalizeQuoteId(req.params.quoteId);
+    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inválido');
+
+    const updated = await unlinkQuoteFromClient(quoteId);
+    if (!updated) {
+      return sendError(res, 404, 'Cotización no encontrada');
+    }
+
+    return sendSuccess(res, 200, {
+      message: 'Cotización desvinculada',
+      cotizacion: mapQuoteResponse(updated, null),
+    });
+  } catch (error) {
+    logger.error({ err: error }, 'Error en unlinkQuoteHandler');
+    return sendError(res, 500, 'No se pudo desvincular la cotización');
+  }
+}
+
+/**
+ * Convierte una cotización en cliente registrado (F8).
+ */
+export async function convertQuoteToClient(req, res) {
+  try {
+    const quoteId = normalizeQuoteId(req.params.quoteId);
+    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inválido');
+
+    const cotizacion = await findQuoteById(quoteId);
+    if (!cotizacion || cotizacion.archivada) {
+      return sendError(res, 404, 'Cotización no encontrada');
+    }
+
+    if (cotizacion.clienteId) {
+      return sendError(res, 409, 'Esta cotización ya está vinculada a un cliente');
+    }
+
+    const {
+      nombreCompleto,
+      telefono,
+      vin,
+      lote,
+      vehiculo,
+      estadoAuto = 'USA',
+    } = req.body;
+
+    if (!nombreCompleto || !telefono || !vin || !lote) {
+      return sendError(res, 400, 'nombreCompleto, telefono, vin y lote son requeridos');
+    }
+
+    if (estadoAuto && !['USA', 'CHILE', 'ADUANA_BOLIVIA', 'BOLIVIA', 'TALLER'].includes(estadoAuto)) {
+      return sendError(res, 400, 'Estado del vehículo inválido');
+    }
+
+    const costoTotalPactado = calculateTotalCost(cotizacion);
+    const vehiculoLabel = vehiculo?.trim()
+      || cotizacion.datosVehiculo?.trim()
+      || [cotizacion.marca, cotizacion.modelo, cotizacion.ano].filter(Boolean).join(' ')
+      || null;
+
+    const insertResult = await createClient({
+      nombreCompleto: String(nombreCompleto).trim(),
+      telefono: String(telefono).trim(),
+      vehiculo: vehiculoLabel,
+      vin: String(vin).trim(),
+      lote: String(lote).trim(),
+      costoTotalPactado,
+      estadoAuto,
+      cotizacionOrigenId: quoteId,
+    });
+
+    const clientId = insertResult.insertedId.toString();
+    await addEstadoHistorialEntry({
+      clienteId: clientId,
+      estadoAnterior: null,
+      estadoNuevo: estadoAuto,
+      notas: 'Cliente creado desde cotización',
+      usuarioId: req.user?.id,
+    });
+
+    const linked = await linkQuoteToClient(quoteId, clientId);
+    const cliente = await findClientById(clientId);
+
+    return sendSuccess(res, 201, {
+      message: 'Cliente registrado y cotización vinculada',
+      cliente: formatClientRef(cliente),
+      cotizacion: mapQuoteResponse(linked, cliente),
+      costoTotalPactado,
+    });
+  } catch (error) {
+    logger.error({ err: error }, 'Error en convertQuoteToClient');
+    return sendError(res, 500, 'No se pudo convertir la cotización en cliente');
+  }
+}
+
+/**
+ * Archiva una cotización (F5).
+ */
+export async function archiveQuote(req, res) {
+  try {
+    const quoteId = normalizeQuoteId(req.params.quoteId);
+    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inválido');
+
+    const archived = await archiveQuoteById(quoteId, req.body?.motivo);
+    if (!archived) return sendError(res, 404, 'Cotización no encontrada');
+
+    const cliente = archived.clienteId
+      ? await findClientById(archived.clienteId.toString())
+      : null;
+
+    return sendSuccess(res, 200, {
+      message: 'Cotización archivada',
+      cotizacion: mapQuoteResponse(archived, cliente),
+    });
+  } catch (error) {
+    logger.error({ err: error }, 'Error en archiveQuote');
+    return sendError(res, 500, 'No se pudo archivar la cotización');
+  }
+}
+
+/**
+ * Restaura una cotización archivada (F5).
+ */
+export async function restoreQuote(req, res) {
+  try {
+    const quoteId = normalizeQuoteId(req.params.quoteId);
+    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inválido');
+
+    const restored = await restoreQuoteById(quoteId);
+    if (!restored) return sendError(res, 404, 'Cotización archivada no encontrada');
+
+    const cliente = restored.clienteId
+      ? await findClientById(restored.clienteId.toString())
+      : null;
+
+    return sendSuccess(res, 200, {
+      message: 'Cotización restaurada',
+      cotizacion: mapQuoteResponse(restored, cliente),
+    });
+  } catch (error) {
+    logger.error({ err: error }, 'Error en restoreQuote');
+    return sendError(res, 500, 'No se pudo restaurar la cotización');
   }
 }

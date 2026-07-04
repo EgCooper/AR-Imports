@@ -4,9 +4,12 @@ import { ImagePlus, Loader2, Receipt, Trash2, X } from 'lucide-react';
 import {
   CONCEPTOS_PAGO,
   METODOS_PAGO,
-  formatMoney,
   getVehicleLabel,
 } from './clientConstants.js';
+import { useExchangeRate } from '../../context/ExchangeRateContext.jsx';
+import ShareActions from '../shared/ShareActions.jsx';
+import { formatDualMoney } from '../../utils/currency.js';
+import { buildPaymentShareText } from '../../utils/shareDocument.js';
 
 const PAGO_INICIAL = {
   clienteId: '',
@@ -101,6 +104,7 @@ export default function RegisterPaymentModal({
   const [comprobante, setComprobante] = useState(null);
   const formScrollRef = useRef(null);
   const summaryRef = useRef(null);
+  const { tipoCambioBob } = useExchangeRate();
 
   useEffect(() => {
     if (open) {
@@ -216,13 +220,15 @@ export default function RegisterPaymentModal({
                 </div>
                 <div className="flex justify-between gap-4">
                   <dt className="text-slate-500">Total abonado</dt>
-                  <dd className="font-semibold text-emerald-700">{formatMoney(summary.resumenFinanciero.totalPagado)}</dd>
+                  <dd className="font-semibold text-emerald-700">
+                    {formatDualMoney(summary.resumenFinanciero.totalPagado, tipoCambioBob)}
+                  </dd>
                 </div>
                 <div className="flex justify-between gap-4">
                   <dt className="text-slate-500">Saldo</dt>
                   <dd className={`font-semibold ${summary.resumenFinanciero.saldoPendiente > 0 ? 'text-slate-900' : 'text-emerald-600'}`}>
                     {summary.resumenFinanciero.saldoPendiente > 0
-                      ? formatMoney(summary.resumenFinanciero.saldoPendiente)
+                      ? formatDualMoney(summary.resumenFinanciero.saldoPendiente, tipoCambioBob)
                       : 'Liquidado'}
                   </dd>
                 </div>
@@ -269,6 +275,28 @@ export default function RegisterPaymentModal({
               <Receipt className="h-4 w-4" />
               Descargar recibo PDF
             </button>
+
+            {client && form.monto && (
+              <ShareActions
+                compact
+                className="w-full"
+                phone={client.telefono}
+                email={client.email}
+                whatsappText={buildPaymentShareText({
+                  client,
+                  pago: { ...form, monto: Number(form.monto) },
+                  resumen: summary?.resumenFinanciero,
+                  tipoCambioBob,
+                })}
+                emailSubject={`Comprobante de abono — ${client.nombreCompleto}`}
+                emailBody={buildPaymentShareText({
+                  client,
+                  pago: { ...form, monto: Number(form.monto) },
+                  resumen: summary?.resumenFinanciero,
+                  tipoCambioBob,
+                })}
+              />
+            )}
           </div>
           </div>
 

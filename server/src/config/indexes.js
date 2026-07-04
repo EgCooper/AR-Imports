@@ -1,4 +1,5 @@
 import { ensureClientIndexes } from '../models/clientModel.js';
+import { ensureEstadoHistorialIndexes } from '../models/estadoHistorialModel.js';
 import { ensurePaymentIndexes } from '../models/paymentModel.js';
 import { ensurePhotoIndexes } from '../models/photoModel.js';
 import { ensureQuoteIndexes } from '../models/quoteModel.js';
@@ -13,6 +14,7 @@ export async function ensureAppIndexes() {
     ensureUserIndexes(),
     ensureRefreshTokenIndexes(),
     ensureClientIndexes(),
+    ensureEstadoHistorialIndexes(),
     ensurePaymentIndexes(),
     ensureQuoteIndexes(),
     ensurePhotoIndexes(),
