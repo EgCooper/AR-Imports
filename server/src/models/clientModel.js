@@ -49,7 +49,51 @@ export async function createClient(clientData) {
  */
 export async function findAllClients() {
   const collection = await getClientsCollection();
-  return collection.find().toArray();
+  return collection.find().sort({ fechaRegistro: -1 }).toArray();
+}
+
+/**
+ * Construye filtro de búsqueda por nombre, VIN, lote o vehículo.
+ * @param {string|undefined} search
+ */
+function buildSearchFilter(search) {
+  const term = search?.trim();
+  if (!term) return {};
+
+  const regex = { $regex: term, $options: 'i' };
+  return {
+    $or: [{ nombreCompleto: regex }, { vin: regex }, { lote: regex }, { vehiculo: regex }],
+  };
+}
+
+/**
+ * Lista clientes con paginación, filtro opcional por estado y búsqueda.
+ * @param {{ skip: number, limit: number, estadoAuto?: string, search?: string }} options
+ * @returns {Promise<{ clients: object[], total: number }>}
+ */
+export async function findClientsPaginated({ skip, limit, estadoAuto, search }) {
+  const collection = await getClientsCollection();
+  const filter = {
+    ...(estadoAuto ? { estadoAuto } : {}),
+    ...buildSearchFilter(search),
+  };
+
+  const [clients, total] = await Promise.all([
+    collection.find(filter).sort({ fechaRegistro: -1 }).skip(skip).limit(limit).toArray(),
+    collection.countDocuments(filter),
+  ]);
+
+  return { clients, total };
+}
+
+/**
+ * Crea índices para consultas frecuentes sobre clientes.
+ */
+export async function ensureClientIndexes() {
+  const collection = await getClientsCollection();
+  await collection.createIndex({ estadoAuto: 1, fechaRegistro: -1 });
+  await collection.createIndex({ vin: 1 });
+  await collection.createIndex({ fechaRegistro: -1 });
 }
 
 /**

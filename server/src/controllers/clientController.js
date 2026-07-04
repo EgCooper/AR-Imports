@@ -2,11 +2,36 @@ import {
   createClient,
   findAllClients,
   findClientById,
+  findClientsPaginated,
   updateClientStatus,
 } from '../models/clientModel.js';
+import { aggregatePaymentTotalsByClientIds } from '../models/paymentModel.js';
 import { sendError, sendSuccess } from '../utils/apiResponse.js';
+import { buildResumenFinanciero } from '../utils/financialSummary.js';
+import { formatClient, formatMany } from '../utils/formatters.js';
+import { buildPaginationMeta, parsePagination } from '../utils/pagination.js';
+import { isAllowedUploadUrl, toNonNegativeNumber } from '../utils/validators.js';
 
 const ESTADOS_VALIDOS = ['USA', 'CHILE', 'ADUANA_BOLIVIA', 'BOLIVIA', 'TALLER'];
+
+async function attachFinancialSummaries(clients) {
+  if (!clients.length) return clients;
+
+  const totalsMap = await aggregatePaymentTotalsByClientIds(clients.map((c) => c._id.toString()));
+
+  return clients.map((client) => {
+    const costoTotalPactado = client.costoTotalPactado ?? 0;
+    const totalPagado = totalsMap.get(client._id.toString()) ?? 0;
+    return {
+      ...formatClient(client),
+      resumenFinanciero: buildResumenFinanciero(costoTotalPactado, totalPagado),
+    };
+  });
+}
+
+function formatClients(clients) {
+  return formatMany(clients, formatClient);
+}
 
 /**
  * Registra un nuevo cliente con su vehículo asociado.
@@ -35,33 +60,42 @@ export async function registerClient(req, res) {
       );
     }
 
+    const costo = toNonNegativeNumber(costoTotalPactado);
+    if (costo === null) {
+      return sendError(res, 400, 'costoTotalPactado debe ser un número mayor o igual a 0');
+    }
+
     if (estadoAuto && !ESTADOS_VALIDOS.includes(estadoAuto)) {
       return sendError(res, 400, `El estado del vehículo debe ser uno de: ${ESTADOS_VALIDOS.join(', ')}`);
     }
 
+    if (fotoAutoUrl && !isAllowedUploadUrl(fotoAutoUrl)) {
+      return sendError(res, 400, 'fotoAutoUrl no es una URL de archivo válida');
+    }
+
     const resultado = await createClient({
-      nombreCompleto,
-      telefono,
+      nombreCompleto: String(nombreCompleto).trim(),
+      telefono: String(telefono).trim(),
       vehiculo,
-      vin,
-      lote,
+      vin: String(vin).trim(),
+      lote: String(lote).trim(),
       fotoAutoUrl,
-      costoTotalPactado,
+      costoTotalPactado: costo,
       estadoAuto,
     });
 
     return sendSuccess(res, 201, {
       id: resultado.insertedId.toString(),
-      nombreCompleto,
-      telefono,
+      nombreCompleto: String(nombreCompleto).trim(),
+      telefono: String(telefono).trim(),
       vehiculo: vehiculo ?? null,
-      vin,
-      lote,
+      vin: String(vin).trim(),
+      lote: String(lote).trim(),
       fotoAutoUrl: fotoAutoUrl ?? null,
-      costoTotalPactado,
+      costoTotalPactado: costo,
       estadoAuto: estadoAuto ?? 'USA',
     });
-  } catch (error) {
+  } catch (_error) {
     return sendError(res, 500, 'Error al registrar el cliente');
   }
 }
@@ -74,14 +108,46 @@ export async function registerClient(req, res) {
  */
 export async function getAllClients(req, res) {
   try {
-    const clientes = await findAllClients();
-    const clientesFormateados = clientes.map(({ _id, ...resto }) => ({
-      id: _id.toString(),
-      ...resto,
-    }));
+    const includeFinanciero = req.query.includeFinanciero === 'true';
+    const estadoAuto = req.query.estado?.toUpperCase();
+    const search = req.query.search?.trim() || undefined;
+    const hasPagination = req.query.page !== undefined || req.query.limit !== undefined;
 
-    return sendSuccess(res, 200, clientesFormateados);
-  } catch (error) {
+    if (estadoAuto && !ESTADOS_VALIDOS.includes(estadoAuto)) {
+      return sendError(res, 400, `El estado del vehículo debe ser uno de: ${ESTADOS_VALIDOS.join(', ')}`);
+    }
+
+    if (hasPagination) {
+      const { page, limit, skip } = parsePagination(req.query);
+      const { clients, total } = await findClientsPaginated({ skip, limit, estadoAuto, search });
+      const formatted = includeFinanciero
+        ? await attachFinancialSummaries(clients)
+        : formatClients(clients);
+
+      return sendSuccess(res, 200, {
+        items: formatted,
+        pagination: buildPaginationMeta(page, limit, total),
+      });
+    }
+
+    let clients;
+    if (estadoAuto) {
+      ({ clients } = await findClientsPaginated({
+        skip: 0,
+        limit: 10_000,
+        estadoAuto,
+        search,
+      }));
+    } else {
+      clients = await findAllClients();
+    }
+
+    const formatted = includeFinanciero
+      ? await attachFinancialSummaries(clients)
+      : formatClients(clients);
+
+    return sendSuccess(res, 200, formatted);
+  } catch (_error) {
     return sendError(res, 500, 'Error al obtener los clientes');
   }
 }
@@ -101,8 +167,8 @@ export async function getClientById(req, res) {
       return sendError(res, 404, 'Cliente no encontrado');
     }
 
-    return sendSuccess(res, 200, cliente);
-  } catch (error) {
+    return sendSuccess(res, 200, formatClient(cliente));
+  } catch (_error) {
     return sendError(res, 400, 'Identificador de cliente inválido');
   }
 }
@@ -128,7 +194,7 @@ export async function updateStatus(req, res) {
     }
 
     return sendSuccess(res, 200, { id, estadoAuto });
-  } catch (error) {
+  } catch (_error) {
     return sendError(res, 400, 'Identificador de cliente inválido');
   }
 }

@@ -2,6 +2,8 @@ import { Router } from 'express';
 
 import { getClientPhotos, uploadComprobanteFile, uploadPhotoRecord, uploadVehicleFiles } from '../controllers/photoController.js';
 import { protect } from '../middlewares/authMiddleware.js';
+import { uploadLimiter } from '../middlewares/rateLimiters.js';
+import { validateUploadMagicBytes } from '../middlewares/validateUploadMagicBytes.js';
 import { uploadComprobantePhoto, uploadVehiclePhotos } from '../middlewares/uploadMiddleware.js';
 
 const router = Router();
@@ -17,21 +19,21 @@ function handleUploadErrors(err, req, res, next) {
   return res.status(400).json({ success: false, message: err.message || 'Error al subir imágenes' });
 }
 
-router.post('/upload', protect, (req, res, next) => {
+router.post('/upload', protect, uploadLimiter, (req, res, next) => {
   uploadVehiclePhotos(req, res, (err) => {
     if (err) return handleUploadErrors(err, req, res, next);
-    return uploadVehicleFiles(req, res);
+    return validateUploadMagicBytes(req, res, () => uploadVehicleFiles(req, res));
   });
 });
 
-router.post('/upload/comprobante', protect, (req, res, next) => {
+router.post('/upload/comprobante', protect, uploadLimiter, (req, res, next) => {
   uploadComprobantePhoto(req, res, (err) => {
     if (err) return handleUploadErrors(err, req, res, next);
-    return uploadComprobanteFile(req, res);
+    return validateUploadMagicBytes(req, res, () => uploadComprobanteFile(req, res));
   });
 });
 
 router.post('/', protect, uploadPhotoRecord);
-router.get('/:clientId', getClientPhotos);
+router.get('/:clientId', protect, getClientPhotos);
 
 export default router;

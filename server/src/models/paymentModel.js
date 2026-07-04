@@ -75,3 +75,33 @@ export async function findPaymentsByClientId(clientId) {
     .sort({ fechaAbono: -1 })
     .toArray();
 }
+
+/**
+ * Suma los pagos por cliente en una sola consulta de agregación.
+ * @param {string[]} clientIds - Identificadores de clientes.
+ * @returns {Promise<Map<string, number>>} Mapa clienteId → total pagado.
+ */
+export async function aggregatePaymentTotalsByClientIds(clientIds) {
+  if (!clientIds.length) return new Map();
+
+  const objectIds = clientIds.map((id) => new ObjectId(id));
+  const collection = await getPaymentsCollection();
+
+  const rows = await collection
+    .aggregate([
+      { $match: { clienteId: { $in: objectIds } } },
+      { $group: { _id: '$clienteId', totalPagado: { $sum: '$monto' } } },
+    ])
+    .toArray();
+
+  return new Map(rows.map((row) => [row._id.toString(), row.totalPagado]));
+}
+
+/**
+ * Crea índices para consultas frecuentes sobre pagos.
+ */
+export async function ensurePaymentIndexes() {
+  const collection = await getPaymentsCollection();
+  await collection.createIndex({ clienteId: 1 });
+  await collection.createIndex({ fechaAbono: -1 });
+}

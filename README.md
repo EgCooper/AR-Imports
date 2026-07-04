@@ -1,11 +1,11 @@
-# AR-Imports
+# ARR-Imports
 
 Sistema ERP para la gestión de vehículos importados desde EEUU a Bolivia.
 
 ## Estructura del proyecto
 
 ```
-AR-Imports/
+ARR-Imports/
 ├── server/          → Backend (Node.js + Express + MongoDB)
 │   ├── src/
 │   ├── package.json

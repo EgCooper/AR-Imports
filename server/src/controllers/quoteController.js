@@ -5,15 +5,19 @@ import {
   findAllQuotes,
   findQuoteByClientId,
   findQuoteById,
+  findQuotesPaginated,
   updateQuoteById,
 } from '../models/quoteModel.js';
+import { logger } from '../utils/logger.js';
 import { sendError, sendSuccess } from '../utils/apiResponse.js';
+import { formatClientRef, formatQuoteDocument } from '../utils/formatters.js';
+import { buildPaginationMeta, parsePagination } from '../utils/pagination.js';
+import { toNonNegativeNumber } from '../utils/validators.js';
 
 const QUOTE_NUMERIC_FIELDS = [
   'totalVehiculo',
   'fees',
   'tarifaUsa',
-  'transferenciaDineroUsa',
   'comisionTresPorcento',
   'transporte',
   'guiaParaRecoger',
@@ -55,15 +59,29 @@ function normalizeClientId(rawId) {
 }
 
 /**
+ * Consolida el rubro legado transferenciaDineroUsa dentro de tarifaUsa.
+ * @param {object} cotizacion - Documento de cotización almacenado.
+ * @returns {object} Campos numéricos normalizados.
+ */
+function normalizeQuoteAmounts(cotizacion) {
+  const amounts = Object.fromEntries(
+    QUOTE_NUMERIC_FIELDS.map((f) => [f, Number(cotizacion[f]) || 0])
+  );
+  const legacyTransfer = Number(cotizacion.transferenciaDineroUsa);
+  if (Number.isFinite(legacyTransfer) && legacyTransfer !== 0) {
+    amounts.tarifaUsa += legacyTransfer;
+  }
+  return amounts;
+}
+
+/**
  * Calcula el costo total de importación sumando todos los rubros financieros.
  * @param {object} cotizacion - Documento de cotización almacenado.
  * @returns {number} Costo total calculado.
  */
 function calculateTotalCost(cotizacion) {
-  return QUOTE_NUMERIC_FIELDS.reduce((total, field) => {
-    const value = Number(cotizacion[field]) || 0;
-    return total + value;
-  }, 0);
+  const amounts = normalizeQuoteAmounts(cotizacion);
+  return QUOTE_NUMERIC_FIELDS.reduce((total, field) => total + amounts[field], 0);
 }
 
 function normalizeQuoteId(rawId) {
@@ -73,6 +91,7 @@ function normalizeQuoteId(rawId) {
 }
 
 function mapQuoteResponse(cotizacion, cliente = null) {
+  const amounts = normalizeQuoteAmounts(cotizacion);
   return {
     id: cotizacion._id.toString(),
     clienteId: cotizacion.clienteId ? cotizacion.clienteId.toString() : null,
@@ -85,7 +104,7 @@ function mapQuoteResponse(cotizacion, cliente = null) {
     tipoVehiculo: cotizacion.tipoVehiculo,
     fechaCreacion: cotizacion.fechaCreacion,
     costoTotalCalculado: calculateTotalCost(cotizacion),
-    ...Object.fromEntries(QUOTE_NUMERIC_FIELDS.map((f) => [f, Number(cotizacion[f]) || 0])),
+    ...amounts,
   };
 }
 
@@ -101,6 +120,13 @@ function validateQuoteBody(body, res) {
     return false;
   }
 
+  for (const field of QUOTE_NUMERIC_FIELDS) {
+    if (toNonNegativeNumber(body[field]) === null) {
+      sendError(res, 400, `${field} debe ser un número mayor o igual a 0`);
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -111,11 +137,24 @@ const TIPOS_VEHICULO = ['AUTO', 'MOTO'];
  */
 export async function listQuotes(req, res) {
   try {
+    const hasPagination = req.query.page !== undefined || req.query.limit !== undefined;
+
+    if (hasPagination) {
+      const { page, limit, skip } = parsePagination(req.query);
+      const { quotes, total } = await findQuotesPaginated({ skip, limit });
+      const data = quotes.map((cot) => mapQuoteResponse(cot, cot.cliente ?? null));
+
+      return sendSuccess(res, 200, {
+        items: data,
+        pagination: buildPaginationMeta(page, limit, total),
+      });
+    }
+
     const cotizaciones = await findAllQuotes();
     const data = cotizaciones.map((cot) => mapQuoteResponse(cot, cot.cliente ?? null));
     return sendSuccess(res, 200, data);
   } catch (error) {
-    console.error('Error en listQuotes:', error.message);
+    logger.error({ err: error }, 'Error en listQuotes');
     return sendError(res, 500, 'Error interno al listar cotizaciones');
   }
 }
@@ -132,24 +171,24 @@ export async function createQuoteHandler(req, res) {
       return sendError(res, 400, 'Identificador de cliente inválido');
     }
 
+    let cliente = null;
     if (clientId) {
-      const cliente = await findClientById(clientId);
+      cliente = await findClientById(clientId);
       if (!cliente) {
         return sendError(res, 404, 'Cliente no encontrado');
       }
     }
 
-    const { clienteId: _omit, ...quotePayload } = req.body;
+    const { clienteId: _clienteId, ...quotePayload } = req.body;
     const result = await createQuote(quotePayload, clientId);
     const cotizacion = await findQuoteById(result.insertedId.toString());
-    const cliente = clientId ? await findClientById(clientId) : null;
 
     return sendSuccess(res, 201, {
       message: 'Cotización creada correctamente',
       cotizacion: mapQuoteResponse(cotizacion, cliente),
     });
   } catch (error) {
-    console.error('Error en createQuoteHandler:', error.message);
+    logger.error({ err: error }, 'Error en createQuoteHandler');
     return sendError(res, 500, 'Error interno al crear la cotización');
   }
 }
@@ -166,17 +205,11 @@ export async function updateQuoteItem(req, res) {
 
     if (!validateQuoteBody(req.body, res)) return;
 
-    const existing = await findQuoteById(quoteId);
-    if (!existing) {
+    const cotizacion = await updateQuoteById(quoteId, req.body);
+    if (!cotizacion) {
       return sendError(res, 404, 'Cotización no encontrada');
     }
 
-    const result = await updateQuoteById(quoteId, req.body);
-    if (!result) {
-      return sendError(res, 404, 'Cotización no encontrada');
-    }
-
-    const cotizacion = await findQuoteById(quoteId);
     const cliente = cotizacion.clienteId
       ? await findClientById(cotizacion.clienteId.toString())
       : null;
@@ -186,7 +219,7 @@ export async function updateQuoteItem(req, res) {
       cotizacion: mapQuoteResponse(cotizacion, cliente),
     });
   } catch (error) {
-    console.error('Error en updateQuoteItem:', error.message);
+    logger.error({ err: error }, 'Error en updateQuoteItem');
     return sendError(res, 500, 'Error interno al actualizar la cotización');
   }
 }
@@ -211,7 +244,7 @@ export async function getQuoteById(req, res) {
       : null;
 
     return sendSuccess(res, 200, mapQuoteResponse(cotizacion, cliente));
-  } catch (error) {
+  } catch (_error) {
     return sendError(res, 400, 'No se pudo obtener la cotización');
   }
 }
@@ -248,18 +281,16 @@ export async function saveQuote(req, res) {
       return sendError(res, 400, `tipoVehiculo debe ser uno de: ${TIPOS_VEHICULO.join(', ')}`);
     }
 
-    await createOrUpdateQuote(clientId, req.body);
-
-    const cotizacion = await findQuoteByClientId(clientId);
+    const cotizacion = await createOrUpdateQuote(clientId, req.body);
     const costoTotalCalculado = calculateTotalCost(cotizacion);
 
     return sendSuccess(res, 200, {
       message: 'Cotización guardada correctamente',
-      cotizacion,
+      cotizacion: formatQuoteDocument(cotizacion),
       costoTotalCalculado,
     });
   } catch (error) {
-    console.error('Error en saveQuote:', error.message);
+    logger.error({ err: error }, 'Error en saveQuote');
     return sendError(res, 500, 'Error interno al guardar la cotización');
   }
 }
@@ -291,14 +322,11 @@ export async function getQuoteByClient(req, res) {
     const costoTotalCalculado = calculateTotalCost(cotizacion);
 
     return sendSuccess(res, 200, {
-      cliente: {
-        id: cliente._id,
-        nombreCompleto: cliente.nombreCompleto,
-      },
-      cotizacion,
+      cliente: formatClientRef(cliente),
+      cotizacion: formatQuoteDocument(cotizacion),
       costoTotalCalculado,
     });
-  } catch (error) {
+  } catch (_error) {
     return sendError(res, 400, 'No se pudo obtener la cotización. Verifique el identificador');
   }
 }

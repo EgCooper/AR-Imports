@@ -1,6 +1,9 @@
 import { findClientById } from '../models/clientModel.js';
 import { addPhotoLog, ESTADOS_VALIDOS, findPhotosByClientId } from '../models/photoModel.js';
 import { sendError, sendSuccess } from '../utils/apiResponse.js';
+import { formatMany, formatPhoto, toIdString } from '../utils/formatters.js';
+import { logger } from '../utils/logger.js';
+import { isAllowedUploadUrl } from '../utils/validators.js';
 
 /**
  * Normaliza un identificador de cliente a un ObjectId hex de 24 caracteres.
@@ -28,15 +31,14 @@ export async function uploadVehicleFiles(req, res) {
       return sendError(res, 400, 'Debes seleccionar al menos una imagen');
     }
 
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const urls = req.files.map((file) => `${baseUrl}/uploads/vehicles/${file.filename}`);
+    const urls = req.files.map((file) => `/uploads/vehicles/${file.filename}`);
 
     return sendSuccess(res, 201, {
       message: `${urls.length} imagen(es) subida(s) correctamente`,
       urls,
     });
   } catch (error) {
-    console.error('Error en uploadVehicleFiles:', error.message);
+    logger.error({ err: error }, 'Error en uploadVehicleFiles');
     return sendError(res, 500, 'Error interno al subir las imágenes');
   }
 }
@@ -50,15 +52,14 @@ export async function uploadComprobanteFile(req, res) {
       return sendError(res, 400, 'Debes seleccionar una imagen de comprobante');
     }
 
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const url = `${baseUrl}/uploads/comprobantes/${req.file.filename}`;
+    const url = `/uploads/comprobantes/${req.file.filename}`;
 
     return sendSuccess(res, 201, {
       message: 'Comprobante subido correctamente',
       url,
     });
   } catch (error) {
-    console.error('Error en uploadComprobanteFile:', error.message);
+    logger.error({ err: error }, 'Error en uploadComprobanteFile');
     return sendError(res, 500, 'Error interno al subir el comprobante');
   }
 }
@@ -83,6 +84,10 @@ export async function uploadPhotoRecord(req, res) {
       );
     }
 
+    if (!isAllowedUploadUrl(fotoUrl)) {
+      return sendError(res, 400, 'fotoUrl no es una URL de archivo válida');
+    }
+
     const cliente = await findClientById(clienteId);
     if (!cliente) {
       return sendError(res, 404, 'Cliente no encontrado');
@@ -95,14 +100,14 @@ export async function uploadPhotoRecord(req, res) {
     });
 
     return sendSuccess(res, 201, {
-      id: resultado.insertedId.toString(),
+      id: toIdString(resultado.insertedId),
       message: 'Foto registrada correctamente',
       clienteId,
       estadoAlMomento,
       fotoUrl,
     });
   } catch (error) {
-    console.error('Error en uploadPhotoRecord:', error.message);
+    logger.error({ err: error }, 'Error en uploadPhotoRecord');
     return sendError(res, 500, 'Error interno al registrar la foto');
   }
 }
@@ -123,9 +128,9 @@ export async function getClientPhotos(req, res) {
 
     const fotos = await findPhotosByClientId(clientId);
 
-    return sendSuccess(res, 200, fotos);
+    return sendSuccess(res, 200, formatMany(fotos, formatPhoto));
   } catch (error) {
-    console.error('Error en getClientPhotos:', error.message);
+    logger.error({ err: error }, 'Error en getClientPhotos');
     return sendError(res, 400, 'No se pudo obtener el historial de fotos. Verifique el identificador');
   }
 }

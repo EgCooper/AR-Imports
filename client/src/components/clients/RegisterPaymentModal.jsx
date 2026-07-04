@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ImagePlus, Loader2, Receipt, Trash2, X } from 'lucide-react';
 
-import { downloadPaymentReceiptPdf } from '../../utils/exportPaymentReceiptPdf.js';
 import {
   CONCEPTOS_PAGO,
   METODOS_PAGO,
@@ -156,8 +155,9 @@ export default function RegisterPaymentModal({
     });
   };
 
-  const handleGenerateReceipt = () => {
+  const handleGenerateReceipt = async () => {
     if (!client || !form.monto) return;
+    const { downloadPaymentReceiptPdf } = await import('../../utils/exportPaymentReceiptPdf.js');
     downloadPaymentReceiptPdf({
       cliente: client,
       pago: { ...form, monto: Number(form.monto) },

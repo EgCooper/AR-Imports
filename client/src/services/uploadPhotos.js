@@ -11,9 +11,7 @@ export async function uploadVehiclePhotos(files) {
   const formData = new FormData();
   files.forEach((file) => formData.append('fotos', file));
 
-  const response = await api.post('/photos/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+  const response = await api.post('/photos/upload', formData);
 
   if (!response.data.success) {
     throw new Error(response.data.message || 'No se pudieron subir las imágenes');
@@ -50,9 +48,7 @@ export async function uploadComprobantePhoto(file) {
   const formData = new FormData();
   formData.append('comprobante', file);
 
-  const response = await api.post('/photos/upload/comprobante', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+  const response = await api.post('/photos/upload/comprobante', formData);
 
   if (!response.data.success) {
     throw new Error(response.data.message || 'No se pudo subir el comprobante');

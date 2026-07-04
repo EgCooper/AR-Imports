@@ -6,6 +6,7 @@ import {
   getConceptLabel,
   getVehicleLabel,
 } from '../components/clients/clientConstants.js';
+import { BRAND_NAME, BRAND_SLUG } from '../constants/brand.js';
 
 function getMetodoLabel(metodo) {
   return METODOS_PAGO.find((m) => m.value === metodo)?.label ?? metodo;
@@ -40,7 +41,7 @@ function writeSectionTitle(doc, title, y) {
 }
 
 /**
- * Genera y descarga un recibo de pago en PDF con el estilo AR-Imports.
+ * Genera y descarga un recibo de pago en PDF.
  */
 export function downloadPaymentReceiptPdf({ cliente, pago, resumen, summary }) {
   const doc = new jsPDF();
@@ -52,7 +53,7 @@ export function downloadPaymentReceiptPdf({ cliente, pago, resumen, summary }) {
   doc.setFontSize(18);
   doc.setFont(undefined, 'bold');
   doc.setTextColor(10, 25, 38);
-  doc.text('AR-Imports', 14, 20);
+  doc.text(BRAND_NAME, 14, 20);
 
   doc.setFontSize(10);
   doc.setFont(undefined, 'normal');
@@ -111,8 +112,8 @@ export function downloadPaymentReceiptPdf({ cliente, pago, resumen, summary }) {
   doc.setFontSize(8);
   doc.setFont(undefined, 'normal');
   doc.setTextColor(148, 163, 184);
-  doc.text('Documento generado por AR-Imports ERP · Recibo de pago', 14, 285);
+  doc.text(`Documento generado por ${BRAND_NAME} · Recibo de pago`, 14, 285);
 
   const slug = cliente.nombreCompleto?.replace(/\s+/g, '-').toLowerCase().slice(0, 24) || 'cliente';
-  doc.save(`recibo-ar-imports-${slug}-${Date.now()}.pdf`);
+  doc.save(`recibo-${BRAND_SLUG}-${slug}-${Date.now()}.pdf`);
 }

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, UserPlus } from 'lucide-react';
+import { Loader2, UserPlus, X } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 
 import api from '../services/api.js';
 import { linkPhotosToClient, uploadVehiclePhotos } from '../services/uploadPhotos.js';
+import { parseClientsResponse, summariesMapFromClients } from '../utils/paymentSummaries.js';
+import { ESTADO_CONFIG } from './clients/clientConstants.js';
 import ClientListPanel from './clients/ClientListPanel.jsx';
 import RegisterClientModal from './clients/RegisterClientModal.jsx';
 
@@ -14,12 +17,20 @@ function sortByRecentRegistration(clients) {
   });
 }
 
+const CLIENTS_PAGE_SIZE = 50;
+
 /**
  * Vista principal de gestión de clientes — listado completo de últimos registrados.
  */
 export default function ClientManagementView() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const estadoFilter = searchParams.get('estado')?.toUpperCase() ?? '';
+  const estadoLabel = ESTADO_CONFIG[estadoFilter]?.label ?? null;
+
   const [clients, setClients] = useState([]);
   const [summaries, setSummaries] = useState({});
+  const [pagination, setPagination] = useState(null);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -28,48 +39,41 @@ export default function ClientManagementView() {
   const [submittingClient, setSubmittingClient] = useState(false);
   const [clientModalError, setClientModalError] = useState('');
 
-  const fetchSummariesForClients = async (list) => {
-    const summaryResults = await Promise.allSettled(
-      list.map((c) => api.get(`/payments/summary/${c.id}`))
-    );
-
-    const nextSummaries = {};
-    summaryResults.forEach((result, index) => {
-      const client = list[index];
-      if (result.status === 'fulfilled' && result.value.data.success) {
-        nextSummaries[client.id] = result.value.data.data;
-      } else {
-        nextSummaries[client.id] = {
-          resumenFinanciero: {
-            costoTotalPactado: client.costoTotalPactado ?? 0,
-            totalPagado: 0,
-            saldoPendiente: client.costoTotalPactado ?? 0,
-          },
-          historialAbonos: [],
-        };
-      }
-    });
-    setSummaries(nextSummaries);
+  const fetchSummariesForClients = (list) => {
+    setSummaries(summariesMapFromClients(list));
   };
 
-  const loadClients = useCallback(async () => {
+  const loadClients = useCallback(async (pageToLoad = 1) => {
     setError('');
     try {
-      const response = await api.get('/clients');
+      const params = {
+        includeFinanciero: true,
+        page: pageToLoad,
+        limit: CLIENTS_PAGE_SIZE,
+      };
+      if (estadoFilter && ESTADO_CONFIG[estadoFilter]) {
+        params.estado = estadoFilter;
+      }
+
+      const response = await api.get('/clients', { params });
       if (response.data.success) {
-        const list = sortByRecentRegistration(response.data.data);
+        const { items, pagination: meta } = parseClientsResponse(response.data.data);
+        const list = sortByRecentRegistration(items);
         setClients(list);
-        await fetchSummariesForClients(list);
+        setPagination(meta);
+        setPage(pageToLoad);
+        fetchSummariesForClients(list);
       }
     } catch (err) {
       setError(err.response?.data?.message || 'No se pudieron cargar los clientes.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [estadoFilter]);
 
   useEffect(() => {
-    loadClients();
+    setLoading(true);
+    loadClients(1);
   }, [loadClients]);
 
   useEffect(() => {
@@ -78,33 +82,37 @@ export default function ClientManagementView() {
     return () => clearTimeout(timer);
   }, [success]);
 
+  const filteredClients = clients;
+
+  const clearEstadoFilter = () => {
+    setSearchParams((params) => {
+      const next = new URLSearchParams(params);
+      next.delete('estado');
+      return next;
+    });
+  };
+
   const refreshClientData = async (clientId) => {
-    const response = await api.get('/clients');
-    if (response.data.success) {
-      const list = sortByRecentRegistration(response.data.data);
-      setClients(list);
-      if (clientId) {
-        const client = list.find((c) => c.id === clientId);
-        try {
-          const summaryRes = await api.get(`/payments/summary/${clientId}`);
-          if (summaryRes.data.success) {
-            setSummaries((prev) => ({ ...prev, [clientId]: summaryRes.data.data }));
-          }
-        } catch {
-          setSummaries((prev) => ({
-            ...prev,
-            [clientId]: {
-              resumenFinanciero: {
-                costoTotalPactado: client?.costoTotalPactado ?? 0,
-                totalPagado: 0,
-                saldoPendiente: client?.costoTotalPactado ?? 0,
-              },
-              historialAbonos: [],
-            },
-          }));
+    await loadClients(page);
+    if (clientId) {
+      try {
+        const summaryRes = await api.get(`/payments/summary/${clientId}`);
+        if (summaryRes.data.success) {
+          setSummaries((prev) => ({ ...prev, [clientId]: summaryRes.data.data }));
         }
-      } else {
-        await fetchSummariesForClients(list);
+      } catch {
+        const client = clients.find((c) => c.id === clientId);
+        setSummaries((prev) => ({
+          ...prev,
+          [clientId]: {
+            resumenFinanciero: {
+              costoTotalPactado: client?.costoTotalPactado ?? 0,
+              totalPagado: 0,
+              saldoPendiente: client?.costoTotalPactado ?? 0,
+            },
+            historialAbonos: [],
+          },
+        }));
       }
     }
   };
@@ -194,11 +202,55 @@ export default function ClientManagementView() {
         </div>
       )}
 
+      {estadoLabel && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <p>
+            Filtrando vehículos en estado:{' '}
+            <span className="font-semibold">{estadoLabel}</span>
+            {' '}({pagination?.total ?? filteredClients.length})
+          </p>
+          <button
+            type="button"
+            onClick={clearEstadoFilter}
+            className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100"
+          >
+            <X className="h-4 w-4" />
+            Quitar filtro
+          </button>
+        </div>
+      )}
+
       <ClientListPanel
-        clients={clients}
+        clients={filteredClients}
         summaries={summaries}
         onStatusUpdate={handleStatusUpdate}
       />
+
+      {pagination && pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+          <p>
+            Página {pagination.page} de {pagination.totalPages} · {pagination.total} clientes
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={pagination.page <= 1 || loading}
+              onClick={() => loadClients(pagination.page - 1)}
+              className="app-btn-secondary min-h-10 px-3 disabled:opacity-50"
+            >
+              Anterior
+            </button>
+            <button
+              type="button"
+              disabled={pagination.page >= pagination.totalPages || loading}
+              onClick={() => loadClients(pagination.page + 1)}
+              className="app-btn-secondary min-h-10 px-3 disabled:opacity-50"
+            >
+              Siguiente
+            </button>
+          </div>
+        </div>
+      )}
 
       <RegisterClientModal
         open={clientModalOpen}

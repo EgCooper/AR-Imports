@@ -24,7 +24,6 @@ function mapQuoteData(quoteData) {
     datosVehiculo: String(quoteData.datosVehiculo ?? '').trim(),
     fees: Number(quoteData.fees),
     tarifaUsa: Number(quoteData.tarifaUsa),
-    transferenciaDineroUsa: Number(quoteData.transferenciaDineroUsa),
     comisionTresPorcento: Number(quoteData.comisionTresPorcento),
     transporte: Number(quoteData.transporte),
     guiaParaRecoger: Number(quoteData.guiaParaRecoger),
@@ -55,17 +54,15 @@ export async function createOrUpdateQuote(clientId, quoteData) {
   const clienteId = new ObjectId(clientId);
   const mappedData = mapQuoteData(quoteData);
 
-  const existing = await collection.findOne({ clienteId });
-
-  if (existing) {
-    return collection.updateOne({ clienteId }, { $set: mappedData });
-  }
-
-  return collection.insertOne({
-    clienteId,
-    ...mappedData,
-    fechaCreacion: new Date(),
-  });
+  return collection.findOneAndUpdate(
+    { clienteId },
+    {
+      $set: mappedData,
+      $unset: { transferenciaDineroUsa: '' },
+      $setOnInsert: { fechaCreacion: new Date() },
+    },
+    { upsert: true, returnDocument: 'after' }
+  );
 }
 
 /**
@@ -93,23 +90,45 @@ export async function findQuoteById(quoteId) {
  * Lista todas las cotizaciones con datos del cliente asociado (si existe).
  * @returns {Promise<object[]>} Cotizaciones ordenadas por fecha de creación descendente.
  */
+function quotesWithClientPipeline({ skip = 0, limit = null } = {}) {
+  const pipeline = [
+    {
+      $lookup: {
+        from: 'Cliente',
+        localField: 'clienteId',
+        foreignField: '_id',
+        as: 'cliente',
+      },
+    },
+    { $unwind: { path: '$cliente', preserveNullAndEmptyArrays: true } },
+    { $sort: { fechaCreacion: -1 } },
+  ];
+
+  if (skip > 0) pipeline.push({ $skip: skip });
+  if (limit !== null) pipeline.push({ $limit: limit });
+
+  return pipeline;
+}
+
 export async function findAllQuotes() {
   const collection = await getQuotesCollection();
+  return collection.aggregate(quotesWithClientPipeline()).toArray();
+}
 
-  return collection
-    .aggregate([
-      {
-        $lookup: {
-          from: 'Cliente',
-          localField: 'clienteId',
-          foreignField: '_id',
-          as: 'cliente',
-        },
-      },
-      { $unwind: { path: '$cliente', preserveNullAndEmptyArrays: true } },
-      { $sort: { fechaCreacion: -1 } },
-    ])
-    .toArray();
+/**
+ * Lista cotizaciones con paginación y datos del cliente asociado.
+ * @param {{ skip: number, limit: number }} options
+ * @returns {Promise<{ quotes: object[], total: number }>}
+ */
+export async function findQuotesPaginated({ skip, limit }) {
+  const collection = await getQuotesCollection();
+
+  const [quotes, total] = await Promise.all([
+    collection.aggregate(quotesWithClientPipeline({ skip, limit })).toArray(),
+    collection.countDocuments(),
+  ]);
+
+  return { quotes, total };
 }
 
 /**
@@ -144,10 +163,18 @@ export async function updateQuoteById(quoteId, quoteData) {
   const collection = await getQuotesCollection();
   const mappedData = mapQuoteData(quoteData);
 
-  const result = await collection.updateOne(
+  return collection.findOneAndUpdate(
     { _id: new ObjectId(quoteId) },
-    { $set: mappedData }
+    { $set: mappedData, $unset: { transferenciaDineroUsa: '' } },
+    { returnDocument: 'after' }
   );
+}
 
-  return result.matchedCount > 0 ? result : null;
+/**
+ * Crea índices para consultas frecuentes sobre cotizaciones.
+ */
+export async function ensureQuoteIndexes() {
+  const collection = await getQuotesCollection();
+  await collection.createIndex({ clienteId: 1 }, { sparse: true });
+  await collection.createIndex({ fechaCreacion: -1 });
 }

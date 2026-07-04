@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   Car,
   ClipboardList,
@@ -55,9 +55,9 @@ const ICON_ACCENTS = {
   slate: 'bg-slate-100 text-slate-600',
 };
 
-function MetricCard({ icon: Icon, label, value, accent = 'slate' }) {
-  return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+function MetricCard({ icon: Icon, label, value, accent = 'slate', to }) {
+  const content = (
+    <>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500 sm:text-sm">{label}</p>
@@ -67,8 +67,21 @@ function MetricCard({ icon: Icon, label, value, accent = 'slate' }) {
           <Icon className="h-5 w-5" aria-hidden="true" />
         </div>
       </div>
-    </article>
+    </>
   );
+
+  const className =
+    'block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors sm:p-5 hover:border-emerald-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600';
+
+  if (to) {
+    return (
+      <Link to={to} className={className} aria-label={`${label}: ${value}. Ir a la sección`}>
+        {content}
+      </Link>
+    );
+  }
+
+  return <article className={className}>{content}</article>;
 }
 
 function PaymentMobileCard({ pago }) {
@@ -117,13 +130,13 @@ export default function DashboardView() {
   }, [location.pathname, fetchDashboard]);
 
   const metricCards = [
-    { key: 'cotizacionesHechas', label: 'Cotizaciones hechas', icon: ClipboardList, accent: 'orange' },
-    { key: 'ventasHechas', label: 'Ventas hechas', icon: TrendingUp, accent: 'emerald' },
-    { key: 'vehiculosEnChile', label: 'Vehículos en Chile', icon: MapPin, accent: 'orange' },
-    { key: 'vehiculosEnBolivia', label: 'Vehículos en Bolivia', icon: Car, accent: 'purple' },
-    { key: 'vehiculosEnAduana', label: 'Vehículos en Aduana', icon: Package, accent: 'blue' },
-    { key: 'vehiculosEnTaller', label: 'Vehículos en el Taller', icon: Wrench, accent: 'emerald' },
-    { key: 'clientesRegistrados', label: 'Clientes registrados', icon: Users, accent: 'slate' },
+    { key: 'cotizacionesHechas', label: 'Cotizaciones hechas', icon: ClipboardList, accent: 'orange', to: '/cotizaciones' },
+    { key: 'ventasHechas', label: 'Ventas hechas', icon: TrendingUp, accent: 'emerald', to: '/pagos' },
+    { key: 'vehiculosEnChile', label: 'Vehículos en Chile', icon: MapPin, accent: 'orange', to: '/clients?estado=CHILE' },
+    { key: 'vehiculosEnBolivia', label: 'Vehículos en Bolivia', icon: Car, accent: 'purple', to: '/clients?estado=BOLIVIA' },
+    { key: 'vehiculosEnAduana', label: 'Vehículos en Aduana', icon: Package, accent: 'blue', to: '/clients?estado=ADUANA_BOLIVIA' },
+    { key: 'vehiculosEnTaller', label: 'Vehículos en el Taller', icon: Wrench, accent: 'emerald', to: '/clients?estado=TALLER' },
+    { key: 'clientesRegistrados', label: 'Clientes registrados', icon: Users, accent: 'slate', to: '/clients' },
   ];
 
   if (loading) {
@@ -146,7 +159,14 @@ export default function DashboardView() {
       <section aria-label="Métricas del negocio">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {metricCards.map((card) => (
-            <MetricCard key={card.key} icon={card.icon} label={card.label} value={metricas[card.key] ?? 0} accent={card.accent} />
+            <MetricCard
+              key={card.key}
+              icon={card.icon}
+              label={card.label}
+              value={metricas[card.key] ?? 0}
+              accent={card.accent}
+              to={card.to}
+            />
           ))}
         </div>
       </section>

@@ -3,6 +3,8 @@ import dns from 'dns';
 import 'dotenv/config';
 import { MongoClient } from 'mongodb';
 
+import { logger } from '../utils/logger.js';
+
 dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 const uri = process.env.DATABASE_URL;
@@ -34,15 +36,15 @@ export async function connectDB() {
     try {
       await client.connect();
       db = client.db();
-      console.log(`Conectado a MongoDB: ${db.databaseName}`);
+      logger.info({ database: db.databaseName }, 'Conectado a MongoDB');
     } catch (error) {
       const isSslError =
         error.code === 'ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR' ||
         error.message?.includes('SSL');
 
       if (isSslError) {
-        console.error(
-          'Error al conectar con MongoDB: revisa en Atlas → Network Access que tu IP esté permitida (o usa 0.0.0.0/0 en desarrollo) y confirma que el cluster no esté pausado.'
+        logger.error(
+          'Error SSL al conectar con MongoDB: revisa Network Access en Atlas y que el cluster no esté pausado'
         );
       }
 
@@ -51,6 +53,35 @@ export async function connectDB() {
   }
 
   return db;
+}
+
+/**
+ * Verifica conectividad con MongoDB mediante ping.
+ * @returns {Promise<boolean>}
+ */
+export async function pingDB() {
+  try {
+    const database = await connectDB();
+    await database.command({ ping: 1 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Cierra la conexión con MongoDB de forma ordenada.
+ */
+export async function closeDB() {
+  try {
+    await client.close();
+    logger.info('Conexión MongoDB cerrada');
+  } catch (error) {
+    logger.warn({ err: error }, 'Error al cerrar MongoDB');
+    throw error;
+  } finally {
+    db = undefined;
+  }
 }
 
 export { client };

@@ -1,4 +1,4 @@
-/** Etiquetas de estado logístico — píldoras de color (Manual de Marca AR-Imports). */
+/** Etiquetas de estado logístico — píldoras de color (Manual de Marca ARR-Imports). */
 const BADGE_BASE = 'inline-flex rounded-full px-3 py-1 text-xs font-medium text-white';
 
 export const ESTADO_CONFIG = {

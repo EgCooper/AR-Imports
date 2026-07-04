@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   CheckCircle2,
@@ -13,22 +13,22 @@ import {
 
 import api from '../services/api.js';
 import { uploadComprobantePhoto } from '../services/uploadPhotos.js';
+import { parseClientsResponse, summariesMapFromClients } from '../utils/paymentSummaries.js';
 import PaymentHistoryPanel from './clients/PaymentHistoryPanel.jsx';
 import RegisterPaymentModal from './clients/RegisterPaymentModal.jsx';
 import { formatMoney, getVehicleLabel } from './clients/clientConstants.js';
 
-function ClientSelector({ clients, selectedId, onSelect, loading }) {
+function ClientSelector({
+  clients,
+  selectedId,
+  onSelect,
+  loading,
+  search,
+  onSearchChange,
+  searchLoading,
+}) {
   const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState('');
   const selected = clients.find((c) => c.id === selectedId);
-
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return clients;
-    return clients.filter((c) =>
-      [c.nombreCompleto, c.lote, c.vin, c.vehiculo].some((f) => f?.toLowerCase().includes(term))
-    );
-  }, [clients, search]);
 
   return (
     <div className="relative">
@@ -59,7 +59,7 @@ function ClientSelector({ clients, selectedId, onSelect, loading }) {
                 <input
                   type="search"
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => onSearchChange(e.target.value)}
                   placeholder="Buscar por nombre, lote o VIN..."
                   className="w-full rounded-lg border border-slate-200 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20"
                   autoFocus
@@ -67,17 +67,21 @@ function ClientSelector({ clients, selectedId, onSelect, loading }) {
               </div>
             </div>
             <ul className="max-h-60 overflow-y-auto py-1">
-              {filtered.length === 0 ? (
+              {searchLoading ? (
+                <li className="flex items-center justify-center px-4 py-6">
+                  <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
+                </li>
+              ) : clients.length === 0 ? (
                 <li className="px-4 py-3 text-sm text-slate-500">Sin resultados</li>
               ) : (
-                filtered.map((client) => (
+                clients.map((client) => (
                   <li key={client.id}>
                     <button
                       type="button"
                       onClick={() => {
                         onSelect(client.id);
                         setOpen(false);
-                        setSearch('');
+                        onSearchChange('');
                       }}
                       className={`w-full px-4 py-3 text-left text-sm transition hover:bg-slate-50 ${
                         client.id === selectedId ? 'bg-emerald-50 font-medium' : ''
@@ -175,36 +179,20 @@ function SelectedClientBanner({ client, summary }) {
   );
 }
 
-async function fetchSummariesForClients(list) {
-  const summaryResults = await Promise.allSettled(
-    list.map((c) => api.get(`/payments/summary/${c.id}`))
-  );
 
-  const nextSummaries = {};
-  summaryResults.forEach((result, index) => {
-    const client = list[index];
-    if (result.status === 'fulfilled' && result.value.data.success) {
-      nextSummaries[client.id] = result.value.data.data;
-    } else {
-      nextSummaries[client.id] = {
-        resumenFinanciero: {
-          costoTotalPactado: client.costoTotalPactado ?? 0,
-          totalPagado: 0,
-          saldoPendiente: client.costoTotalPactado ?? 0,
-        },
-        historialAbonos: [],
-      };
-    }
-  });
-  return nextSummaries;
-}
+const CLIENTS_PAGE_SIZE = 50;
 
 export default function PaymentsView() {
   const [searchParams] = useSearchParams();
   const [clients, setClients] = useState([]);
   const [summaries, setSummaries] = useState({});
   const [clientsLoading, setClientsLoading] = useState(true);
+  const [clientsPagination, setClientsPagination] = useState(null);
+  const [clientsPage, setClientsPage] = useState(1);
+  const [clientSearch, setClientSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedClientId, setSelectedClientId] = useState('');
+  const [selectedClientDetail, setSelectedClientDetail] = useState(null);
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [error, setError] = useState('');
@@ -216,23 +204,42 @@ export default function PaymentsView() {
 
   const clienteFromUrl = searchParams.get('cliente');
 
-  const selectedClient = clients.find((c) => c.id === selectedClientId);
+  const selectedClient =
+    clients.find((c) => c.id === selectedClientId) ?? selectedClientDetail;
 
-  const fetchClients = useCallback(async () => {
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(clientSearch.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [clientSearch]);
+
+  useEffect(() => {
+    setClientsPage(1);
+  }, [debouncedSearch]);
+
+  const fetchClients = useCallback(async (pageToLoad = 1, searchTerm = debouncedSearch) => {
+    setClientsLoading(true);
     try {
-      const response = await api.get('/clients');
+      const params = {
+        includeFinanciero: true,
+        page: pageToLoad,
+        limit: CLIENTS_PAGE_SIZE,
+      };
+      if (searchTerm) params.search = searchTerm;
+
+      const response = await api.get('/clients', { params });
       if (response.data.success) {
-        const list = response.data.data;
-        setClients(list);
-        const nextSummaries = await fetchSummariesForClients(list);
-        setSummaries(nextSummaries);
+        const { items, pagination } = parseClientsResponse(response.data.data);
+        setClients(items);
+        setClientsPagination(pagination);
+        setClientsPage(pageToLoad);
+        setSummaries((prev) => ({ ...prev, ...summariesMapFromClients(items) }));
       }
     } catch (err) {
       setError(err.response?.data?.message || 'No se pudieron cargar los clientes.');
     } finally {
       setClientsLoading(false);
     }
-  }, []);
+  }, [debouncedSearch]);
 
   const fetchSummary = useCallback(async (clientId) => {
     if (!clientId) return;
@@ -253,15 +260,42 @@ export default function PaymentsView() {
   }, []);
 
   useEffect(() => {
-    fetchClients();
-  }, [fetchClients]);
+    fetchClients(clientsPage, debouncedSearch);
+  }, [fetchClients, clientsPage, debouncedSearch]);
 
   useEffect(() => {
-    if (!clienteFromUrl || clientsLoading || clients.length === 0) return;
-    if (clients.some((c) => c.id === clienteFromUrl)) {
-      setSelectedClientId(clienteFromUrl);
+    if (!selectedClientId) {
+      setSelectedClientDetail(null);
+      return;
     }
-  }, [clienteFromUrl, clients, clientsLoading]);
+
+    const inList = clients.find((c) => c.id === selectedClientId);
+    if (inList) {
+      setSelectedClientDetail(inList);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await api.get(`/clients/${selectedClientId}`);
+        if (!cancelled && response.data.success) {
+          setSelectedClientDetail(response.data.data);
+        }
+      } catch {
+        if (!cancelled) setSelectedClientDetail(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedClientId, clients]);
+
+  useEffect(() => {
+    if (!clienteFromUrl || clientsLoading) return;
+    setSelectedClientId(clienteFromUrl);
+  }, [clienteFromUrl, clientsLoading]);
 
   useEffect(() => {
     if (selectedClientId) fetchSummary(selectedClientId);
@@ -300,6 +334,7 @@ export default function PaymentsView() {
           setSelectedClientId(targetId);
         }
         await fetchSummary(targetId);
+        await fetchClients(clientsPage, debouncedSearch);
       }
     } catch (err) {
       setPaymentModalError(err.response?.data?.message || 'Error al registrar el pago.');
@@ -345,7 +380,36 @@ export default function PaymentsView() {
         selectedId={selectedClientId}
         onSelect={setSelectedClientId}
         loading={clientsLoading}
+        search={clientSearch}
+        onSearchChange={setClientSearch}
+        searchLoading={clientsLoading && clientSearch !== debouncedSearch}
       />
+
+      {clientsPagination && clientsPagination.totalPages > 1 && (
+        <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+          <p>
+            Página {clientsPagination.page} de {clientsPagination.totalPages} · {clientsPagination.total} clientes
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={clientsPagination.page <= 1 || clientsLoading}
+              onClick={() => setClientsPage((p) => p - 1)}
+              className="app-btn-secondary min-h-10 px-3 disabled:opacity-50"
+            >
+              Anterior
+            </button>
+            <button
+              type="button"
+              disabled={clientsPagination.page >= clientsPagination.totalPages || clientsLoading}
+              onClick={() => setClientsPage((p) => p + 1)}
+              className="app-btn-secondary min-h-10 px-3 disabled:opacity-50"
+            >
+              Siguiente
+            </button>
+          </div>
+        </div>
+      )}
 
       {!selectedClientId ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">

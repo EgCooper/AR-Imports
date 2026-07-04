@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { CreditCard, FileText, LayoutDashboard, LogOut, Menu, Users, X } from 'lucide-react';
 
+import { BRAND_LOGO_MARK, BRAND_NAME } from '../constants/brand.js';
+import { useAuth } from '../context/AuthContext.jsx';
+
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/cotizaciones', label: 'Cotizaciones', icon: FileText },
@@ -35,10 +38,10 @@ function SidebarContent({ user, onLogout, onNavigate }) {
       <div className="border-b border-white/10 px-5 py-5">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white">
-            <span className="text-sm font-bold">AR</span>
+            <span className="text-sm font-bold">{BRAND_LOGO_MARK}</span>
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-white">AR-Imports</p>
+            <p className="truncate text-sm font-semibold text-white">{BRAND_NAME}</p>
             {user?.nombre && (
               <p className="truncate text-xs text-slate-400">{user.nombre}</p>
             )}
@@ -70,15 +73,9 @@ export default function DashboardLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const { user, logout } = useAuth();
   const currentPage =
     NAV_ITEMS.find((item) => location.pathname.startsWith(item.to))?.label ?? 'Dashboard';
-
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) navigate('/login');
-  }, [navigate]);
 
   useEffect(() => {
     setMobileOpen(false);
@@ -89,9 +86,8 @@ export default function DashboardLayout() {
     return () => { document.body.style.overflow = ''; };
   }, [mobileOpen]);
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
 
@@ -129,7 +125,7 @@ export default function DashboardLayout() {
           </button>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-slate-900">{currentPage}</p>
-            <p className="truncate text-xs text-slate-500">AR-Imports</p>
+            <p className="truncate text-xs text-slate-500">{BRAND_NAME}</p>
           </div>
         </header>
 

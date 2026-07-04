@@ -59,3 +59,11 @@ export async function findPhotosByClientId(clientId) {
     .sort({ fechaSubida: -1 })
     .toArray();
 }
+
+/**
+ * Crea índices para consultas frecuentes sobre fotos logísticas.
+ */
+export async function ensurePhotoIndexes() {
+  const collection = await getPhotosCollection();
+  await collection.createIndex({ clienteId: 1, fechaSubida: -1 });
+}

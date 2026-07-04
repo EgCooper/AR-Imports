@@ -2,10 +2,13 @@ import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
+import { BRAND_LOGO_MARK, BRAND_NAME } from '../constants/brand.js';
+import { useAuth } from '../context/AuthContext.jsx';
 import api from '../services/api.js';
 
 export default function Login() {
   const navigate = useNavigate();
+  const { setUser } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -19,9 +22,10 @@ export default function Login() {
     try {
       const response = await api.post('/auth/login', { email, password });
       if (response.data.success) {
-        localStorage.setItem('token', response.data.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.data.usuario));
+        setUser(response.data.data.usuario);
         navigate('/dashboard');
+      } else {
+        setError(response.data.message || 'Credenciales incorrectas.');
       }
     } catch (err) {
       setError(err.response?.data?.message || 'Credenciales incorrectas.');
@@ -39,9 +43,9 @@ export default function Login() {
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-6 sm:p-8">
           <div className="mb-8 flex flex-col items-center text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#00875a]" aria-hidden="true">
-              <span className="text-base font-bold text-white">AR</span>
+              <span className="text-base font-bold text-white">{BRAND_LOGO_MARK}</span>
             </div>
-            <p className="mt-3 text-lg font-semibold text-white">AR-Imports</p>
+            <p className="mt-3 text-lg font-semibold text-white">{BRAND_NAME}</p>
             <p className="mt-1 text-sm text-slate-400">Importaciones de EEUU a Bolivia</p>
           </div>
 

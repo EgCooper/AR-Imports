@@ -1,30 +1,32 @@
-import dotenv from 'dotenv';
-import jwt from 'jsonwebtoken';
-
+import { findById } from '../models/userModel.js';
 import { sendError } from '../utils/apiResponse.js';
-
-dotenv.config();
+import { getAccessTokenFromRequest } from '../utils/cookies.js';
+import { verifyAccessToken } from '../utils/tokens.js';
 
 /**
- * Protege rutas privadas verificando un token JWT válido en el encabezado Authorization.
- * @param {import('express').Request} req - Petición HTTP entrante.
- * @param {import('express').Response} res - Respuesta HTTP.
- * @param {import('express').NextFunction} next - Función para continuar al siguiente middleware.
- * @returns {void|import('express').Response}
+ * Protege rutas privadas: JWT en cookie httpOnly (o Bearer legacy) + usuario activo en BD.
  */
-export function protect(req, res, next) {
-  const authHeader = req.headers.authorization;
+export async function protect(req, res, next) {
+  const token = getAccessTokenFromRequest(req);
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!token) {
     return sendError(res, 401, 'Acceso denegado. No autorizado');
   }
 
-  const token = authHeader.split(' ')[1];
-
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = { userId: decoded.userId };
-    next();
+    const decoded = verifyAccessToken(token);
+    const user = await findById(decoded.userId);
+
+    if (!user) {
+      return sendError(res, 401, 'Acceso denegado. No autorizado');
+    }
+
+    req.user = {
+      userId: decoded.userId,
+      nombre: user.nombre,
+      email: user.email,
+    };
+    return next();
   } catch {
     return sendError(res, 401, 'Acceso denegado. No autorizado');
   }

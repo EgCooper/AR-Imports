@@ -11,7 +11,7 @@ export async function getDashboard(req, res) {
   try {
     const data = await getDashboardStats();
     return sendSuccess(res, 200, data);
-  } catch (error) {
+  } catch (_error) {
     return sendError(res, 500, 'Error al cargar datos del dashboard');
   }
 }
