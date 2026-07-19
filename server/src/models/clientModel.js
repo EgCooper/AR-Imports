@@ -1,8 +1,10 @@
 import { ObjectId } from 'mongodb';
 
 import { getDB } from '../config/db.js';
+import { sanitizeSearchTerm } from '../utils/search.js';
 
 const COLLECTION_NAME = 'Cliente';
+const SEARCH_MAX_TIME_MS = Number(process.env.CLIENT_SEARCH_MAX_TIME_MS || 2000);
 
 /**
  * Obtiene la referencia a la colección de clientes.
@@ -60,10 +62,11 @@ export async function findAllClients() {
 
 /**
  * Construye filtro de búsqueda por nombre, VIN, lote o vehículo.
+ * Escapa metacaracteres regex y limita longitud (anti ReDoS).
  * @param {string|undefined} search
  */
 function buildSearchFilter(search) {
-  const term = search?.trim();
+  const term = sanitizeSearchTerm(search);
   if (!term) return {};
 
   const regex = { $regex: term, $options: 'i' };
@@ -118,8 +121,14 @@ export async function findClientsPaginated({ skip, limit, estadoAuto, search, fe
   const filter = buildClientFilter({ estadoAuto, search, fechaDesde, fechaHasta, incluirArchivados });
 
   const [clients, total] = await Promise.all([
-    collection.find(filter).sort({ fechaRegistro: -1 }).skip(skip).limit(limit).toArray(),
-    collection.countDocuments(filter),
+    collection
+      .find(filter)
+      .maxTimeMS(SEARCH_MAX_TIME_MS)
+      .sort({ fechaRegistro: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray(),
+    collection.countDocuments(filter, { maxTimeMS: SEARCH_MAX_TIME_MS }),
   ]);
 
   return { clients, total };
@@ -134,7 +143,12 @@ export async function findClientsForExport(filters, maxRows = 10_000) {
   const collection = await getClientsCollection();
   const filter = buildClientFilter(filters);
 
-  return collection.find(filter).sort({ fechaRegistro: -1 }).limit(maxRows).toArray();
+  return collection
+    .find(filter)
+    .maxTimeMS(SEARCH_MAX_TIME_MS * 5)
+    .sort({ fechaRegistro: -1 })
+    .limit(maxRows)
+    .toArray();
 }
 
 /**
@@ -146,6 +160,8 @@ export async function ensureClientIndexes() {
   await collection.createIndex({ vin: 1 });
   await collection.createIndex({ fechaRegistro: -1 });
   await collection.createIndex({ archivado: 1, fechaRegistro: -1 });
+  await collection.createIndex({ nombreCompleto: 1 });
+  await collection.createIndex({ lote: 1 });
 }
 
 /**

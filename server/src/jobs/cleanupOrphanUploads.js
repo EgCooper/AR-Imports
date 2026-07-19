@@ -137,7 +137,7 @@ export async function cleanupOrphanUploads(options = {}) {
   const dryRun = options.dryRun ?? false;
   const minAgeMs =
     options.minAgeMs ??
-    Number(process.env.UPLOAD_ORPHAN_MIN_AGE_HOURS || 24) * 60 * 60 * 1000;
+    Number(process.env.UPLOAD_ORPHAN_MIN_AGE_HOURS || 1) * 60 * 60 * 1000;
 
   const referenced = await collectReferencedUploadPaths();
 

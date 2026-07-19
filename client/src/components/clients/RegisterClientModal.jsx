@@ -13,7 +13,7 @@ const FORM_INICIAL = {
   estadoAuto: 'USA',
 };
 
-const MAX_PHOTOS = 10;
+const MAX_PHOTOS = 5;
 const MAX_SIZE_MB = 8;
 
 function VehiclePhotoUpload({ photos, onAdd, onRemove, disabled }) {
