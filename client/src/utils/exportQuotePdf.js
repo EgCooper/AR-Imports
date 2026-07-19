@@ -45,8 +45,7 @@ const PDF_SECTIONS = [
     items: [
       { key: 'totalVehiculo', label: 'Precio de compra aprox.' },
       { key: 'fees', label: 'Fees' },
-      { key: 'tarifaUsa', label: 'Tarifa USA' },
-      { key: 'comisionTresPorcento', label: 'Comisión vehículo' },
+      { key: 'tarifaUsa', label: 'Transferencia USA', withPercent: true },
     ],
   },
   {
@@ -137,7 +136,7 @@ function drawSection(doc, section, form, y) {
   doc.text(title, labelX, y + 6.2);
 
   // Filas a ancho completo (sin marcas laterales)
-  items.forEach(({ key, label }, i) => {
+  items.forEach(({ key, label, withPercent }, i) => {
     const rowY = y + headerH + bodyPadTop + 5 + i * rowH;
 
     if (i > 0) {
@@ -146,10 +145,14 @@ function drawSection(doc, section, form, y) {
       doc.line(labelX, rowY - 3.5, amountX, rowY - 3.5);
     }
 
+    const pct = num(form.porcentajeTransferenciaUsa);
+    const displayLabel =
+      withPercent && pct > 0 ? `${label} (${pct}%)` : label;
+
     doc.setFont(undefined, 'normal');
     doc.setFontSize(10);
     doc.setTextColor(71, 85, 105);
-    doc.text(label, labelX, rowY);
+    doc.text(displayLabel, labelX, rowY);
 
     doc.setFont(undefined, 'bold');
     doc.setTextColor(15, 23, 42);

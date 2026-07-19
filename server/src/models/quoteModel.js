@@ -19,12 +19,14 @@ async function getQuotesCollection() {
  * @returns {object} Documento con tipos de datos correctos.
  */
 function mapQuoteData(quoteData) {
+  const porcentaje = Number(quoteData.porcentajeTransferenciaUsa);
   return {
     totalVehiculo: Number(quoteData.totalVehiculo),
     datosVehiculo: String(quoteData.datosVehiculo ?? '').trim(),
     fees: Number(quoteData.fees),
     tarifaUsa: Number(quoteData.tarifaUsa),
     comisionTresPorcento: Number(quoteData.comisionTresPorcento),
+    porcentajeTransferenciaUsa: Number.isFinite(porcentaje) && porcentaje > 0 ? porcentaje : null,
     transporte: Number(quoteData.transporte),
     guiaParaRecoger: Number(quoteData.guiaParaRecoger),
     comisionImportador: Number(quoteData.comisionImportador),

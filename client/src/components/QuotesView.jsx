@@ -20,9 +20,12 @@ import ArchiveQuoteModal from './clients/ArchiveQuoteModal.jsx';
 import ConvertQuoteModal from './clients/ConvertQuoteModal.jsx';
 import { buildQuoteShareText } from '../utils/shareDocument.js';
 import { parseQuotesResponse } from '../utils/paymentSummaries.js';
+import ExchangeRateControl from './shared/ExchangeRateControl.jsx';
 import ShareActions from './shared/ShareActions.jsx';
 import { formatDate, formatMoney } from './clients/clientConstants.js';
 import { convertUsdToBob, formatBob } from '../utils/currency.js';
+
+const DEFAULT_PORCENTAJE_TRANSFERENCIA = 3;
 
 const NUMERIC_FIELDS = [
   'totalVehiculo',
@@ -56,6 +59,7 @@ const FORM_INICIAL = {
   modelo: '',
   ano: '',
   tipoVehiculo: 'AUTO',
+  porcentajeTransferenciaUsa: String(DEFAULT_PORCENTAJE_TRANSFERENCIA),
   ...Object.fromEntries(NUMERIC_FIELDS.map((f) => [f, '0'])),
 };
 
@@ -113,12 +117,12 @@ const GRUPOS = [
     campos: [
       { key: 'totalVehiculo', type: 'money', label: 'Precio de compra aprox.' },
       { key: 'fees', type: 'money', label: 'Fees' },
-      { key: 'tarifaUsa', type: 'money', label: 'Tarifa USA' },
       {
-        key: 'comisionTresPorcento',
-        type: 'money',
-        label: 'Comisión vehículo',
-        hint: 'Se calcula al 3% del precio de compra; puedes ajustarlo manualmente.',
+        key: 'tarifaUsa',
+        type: 'transferencia',
+        label: 'Transferencia USA',
+        percentageKey: 'porcentajeTransferenciaUsa',
+        hint: 'Se calcula con el % sobre el precio de compra; puedes cambiar el % o el monto.',
       },
     ],
   },
@@ -164,8 +168,21 @@ function num(value) {
   return Number(value) || 0;
 }
 
-function calcularTresPorciento(totalVehiculo) {
-  return String(Number((num(totalVehiculo) * 0.03).toFixed(2)));
+function calcularTransferenciaUsa(totalVehiculo, porcentaje) {
+  const rate = num(porcentaje) / 100;
+  return String(Number((num(totalVehiculo) * rate).toFixed(2)));
+}
+
+function resolvePorcentajeTransferencia(quote, transferenciaAmount) {
+  const stored = Number(quote?.porcentajeTransferenciaUsa);
+  if (Number.isFinite(stored) && stored > 0) {
+    return String(stored);
+  }
+  const precio = num(quote?.totalVehiculo);
+  if (precio > 0 && num(transferenciaAmount) > 0) {
+    return String(Number(((num(transferenciaAmount) / precio) * 100).toFixed(2)));
+  }
+  return String(DEFAULT_PORCENTAJE_TRANSFERENCIA);
 }
 
 function buildVehicleLabel(form) {
@@ -181,10 +198,14 @@ function mapFormToPayload(form) {
     modelo: form.modelo.trim() || undefined,
     ano: form.ano ? Number(form.ano) : undefined,
     tipoVehiculo: form.tipoVehiculo || undefined,
+    porcentajeTransferenciaUsa: num(form.porcentajeTransferenciaUsa),
   };
   NUMERIC_FIELDS.forEach((f) => {
     payload[f] = num(form[f]);
   });
+  // Un solo rubro visible: Transferencia USA (se guarda en tarifaUsa).
+  payload.tarifaUsa = num(form.tarifaUsa);
+  payload.comisionTresPorcento = 0;
   return payload;
 }
 
@@ -199,11 +220,15 @@ function quoteToForm(quote) {
   NUMERIC_FIELDS.forEach((f) => {
     form[f] = String(quote[f] ?? 0);
   });
-  // Cotizaciones antiguas podían tener transferenciaDineroUsa aparte; se consolida en tarifaUsa.
+  // Consolida rubros legacy (tarifaUsa + comisión vehículo + transferenciaDineroUsa).
   const legacyTransfer = Number(quote.transferenciaDineroUsa);
-  if (Number.isFinite(legacyTransfer) && legacyTransfer !== 0) {
-    form.tarifaUsa = String(num(form.tarifaUsa) + legacyTransfer);
-  }
+  const mergedTransfer =
+    num(form.tarifaUsa) +
+    num(form.comisionTresPorcento) +
+    (Number.isFinite(legacyTransfer) ? legacyTransfer : 0);
+  form.tarifaUsa = String(mergedTransfer);
+  form.comisionTresPorcento = '0';
+  form.porcentajeTransferenciaUsa = resolvePorcentajeTransferencia(quote, mergedTransfer);
   return form;
 }
 
@@ -246,6 +271,88 @@ function MoneyInput({ name, label, value, onChange, readOnly, disabled, hint }) 
             readOnly ? 'cursor-not-allowed text-slate-600' : ''
           }`}
         />
+      </div>
+      {hint && !readOnly && (
+        <p className="mt-1 text-xs text-slate-400">{hint}</p>
+      )}
+    </div>
+  );
+}
+
+function TransferenciaUsaInput({
+  amountName,
+  percentageName,
+  label,
+  amount,
+  percentage,
+  onChange,
+  readOnly,
+  disabled,
+  hint,
+}) {
+  return (
+    <div className="sm:col-span-2">
+      <label htmlFor={amountName} className="mb-1.5 block text-sm font-medium text-slate-700">
+        {label}
+      </label>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[7.5rem_1fr]">
+        <div>
+          <div
+            className={`flex min-h-11 overflow-hidden rounded-lg border transition-colors ${
+              readOnly
+                ? 'border-slate-200 bg-slate-100'
+                : 'border-slate-200 bg-slate-50 focus-within:border-emerald-600 focus-within:ring-2 focus-within:ring-emerald-600/20'
+            }`}
+          >
+            <input
+              id={percentageName}
+              name={percentageName}
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              placeholder="3"
+              readOnly={readOnly}
+              disabled={disabled || readOnly}
+              value={percentage}
+              onChange={onChange}
+              aria-label="Porcentaje transferencia USA"
+              className={`min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 ${
+                readOnly ? 'cursor-not-allowed text-slate-600' : ''
+              }`}
+            />
+            <span className="flex w-10 shrink-0 items-center justify-center border-l border-slate-200 bg-slate-100 text-sm font-medium text-slate-500">
+              %
+            </span>
+          </div>
+        </div>
+        <div
+          className={`flex min-h-11 overflow-hidden rounded-lg border transition-colors ${
+            readOnly
+              ? 'border-slate-200 bg-slate-100'
+              : 'border-slate-200 bg-slate-50 focus-within:border-emerald-600 focus-within:ring-2 focus-within:ring-emerald-600/20'
+          }`}
+        >
+          <span className="flex w-10 shrink-0 items-center justify-center border-r border-slate-200 bg-slate-100 text-sm font-medium text-slate-500">
+            $
+          </span>
+          <input
+            id={amountName}
+            name={amountName}
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            placeholder="0.00"
+            readOnly={readOnly}
+            disabled={disabled || readOnly}
+            value={amount}
+            onChange={onChange}
+            className={`min-w-0 flex-1 border-0 bg-transparent px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 ${
+              readOnly ? 'cursor-not-allowed text-slate-600' : ''
+            }`}
+          />
+        </div>
       </div>
       {hint && !readOnly && (
         <p className="mt-1 text-xs text-slate-400">{hint}</p>
@@ -324,18 +431,33 @@ function QuoteGroupCard({ grupo, form, onChange, disabled, showVehicleFields, re
         )}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {grupo.campos.map((campo) => (
-            <MoneyInput
-              key={campo.key}
-              name={campo.key}
-              label={campo.label}
-              value={form[campo.key]}
-              onChange={onChange}
-              readOnly={campo.readOnly || readOnly}
-              disabled={disabled || readOnly}
-              hint={campo.hint}
-            />
-          ))}
+          {grupo.campos.map((campo) =>
+            campo.type === 'transferencia' ? (
+              <TransferenciaUsaInput
+                key={campo.key}
+                amountName={campo.key}
+                percentageName={campo.percentageKey}
+                label={campo.label}
+                amount={form[campo.key]}
+                percentage={form[campo.percentageKey]}
+                onChange={onChange}
+                readOnly={campo.readOnly || readOnly}
+                disabled={disabled || readOnly}
+                hint={campo.hint}
+              />
+            ) : (
+              <MoneyInput
+                key={campo.key}
+                name={campo.key}
+                label={campo.label}
+                value={form[campo.key]}
+                onChange={onChange}
+                readOnly={campo.readOnly || readOnly}
+                disabled={disabled || readOnly}
+                hint={campo.hint}
+              />
+            )
+          )}
         </div>
       </div>
     </section>
@@ -409,7 +531,8 @@ function FinancialSummary({
 
       <div className="space-y-0">
         <SummaryRow label="Precio de compra" value={subtotales.precioCompra} />
-        <SummaryRow label="Comisión" value={subtotales.comision} />
+        <SummaryRow label="Transferencia USA" value={subtotales.transferenciaUsa} />
+        <SummaryRow label="Comisión general" value={subtotales.comision} />
         <SummaryRow label="Logística y transporte" value={subtotales.logistica} />
         <SummaryRow label="Trámites y documentación" value={subtotales.tramites} />
       </div>
@@ -734,9 +857,9 @@ export default function QuotesView() {
 
   const subtotales = useMemo(() => ({
     precioCompra: num(form.totalVehiculo) + num(form.fees),
-    comision: num(form.comisionImportador) + num(form.comisionTresPorcento),
+    transferenciaUsa: num(form.tarifaUsa),
+    comision: num(form.comisionImportador),
     logistica:
-      num(form.tarifaUsa) +
       num(form.transporte) +
       num(form.guiaParaRecoger),
     tramites:
@@ -780,7 +903,12 @@ export default function QuotesView() {
   }, [screen, loadQuotes, quotesPage]);
 
   const resetForm = () => {
-    setForm({ ...FORM_INICIAL, comisionTresPorcento: '0' });
+    setForm({
+      ...FORM_INICIAL,
+      porcentajeTransferenciaUsa: String(DEFAULT_PORCENTAJE_TRANSFERENCIA),
+      tarifaUsa: '0',
+      comisionTresPorcento: '0',
+    });
     setEditingQuoteId(null);
     setClientName('');
     setFormMode('create');
@@ -812,8 +940,11 @@ export default function QuotesView() {
 
     setForm((prev) => {
       const next = { ...prev, [name]: value };
-      if (name === 'totalVehiculo') {
-        next.comisionTresPorcento = calcularTresPorciento(value);
+      if (name === 'totalVehiculo' || name === 'porcentajeTransferenciaUsa') {
+        next.tarifaUsa = calcularTransferenciaUsa(
+          name === 'totalVehiculo' ? value : next.totalVehiculo,
+          name === 'porcentajeTransferenciaUsa' ? value : next.porcentajeTransferenciaUsa
+        );
       }
       return next;
     });
@@ -943,6 +1074,10 @@ export default function QuotesView() {
             </button>
           )}
         </div>
+      </div>
+
+      <div className="lg:hidden">
+        <ExchangeRateControl variant="light" />
       </div>
 
       {error && <div role="alert" className="app-alert-error">{error}</div>}

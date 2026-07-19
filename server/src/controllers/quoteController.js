@@ -40,7 +40,7 @@ const QUOTE_FIELDS = ['datosVehiculo', ...QUOTE_NUMERIC_FIELDS];
 /**
  * Normaliza un identificador de cliente a un ObjectId hex de 24 caracteres.
  * @param {string} rawId - ID recibido desde la URL o body.
- * @returns {string|null} ID válido o null si no se puede interpretar.
+ * @returns {string|null} ID v?lido o null si no se puede interpretar.
  */
 function normalizeClientId(rawId) {
   if (!rawId) return null;
@@ -57,7 +57,7 @@ function normalizeClientId(rawId) {
       return parsed.$oid;
     }
   } catch {
-    // No es JSON, continuar con validación estándar
+    // No es JSON, continuar con validaci?n est?ndar
   }
 
   return null;
@@ -66,7 +66,7 @@ function normalizeClientId(rawId) {
 /**
  * Consolida el rubro legado transferenciaDineroUsa dentro de tarifaUsa.
  * @param {object} cotizacion - Documento de cotización almacenado.
- * @returns {object} Campos numéricos normalizados.
+ * @returns {object} Campos num?ricos normalizados.
  */
 function normalizeQuoteAmounts(cotizacion) {
   const amounts = Object.fromEntries(
@@ -75,6 +75,11 @@ function normalizeQuoteAmounts(cotizacion) {
   const legacyTransfer = Number(cotizacion.transferenciaDineroUsa);
   if (Number.isFinite(legacyTransfer) && legacyTransfer !== 0) {
     amounts.tarifaUsa += legacyTransfer;
+  }
+  // Comisión vehículo legacy se consolida en Transferencia USA (tarifaUsa).
+  if (amounts.comisionTresPorcento) {
+    amounts.tarifaUsa += amounts.comisionTresPorcento;
+    amounts.comisionTresPorcento = 0;
   }
   return amounts;
 }
@@ -109,6 +114,7 @@ function mapQuoteResponse(cotizacion, cliente = null) {
     tipoVehiculo: cotizacion.tipoVehiculo,
     fechaCreacion: cotizacion.fechaCreacion,
     archivada: Boolean(cotizacion.archivada),
+    porcentajeTransferenciaUsa: cotizacion.porcentajeTransferenciaUsa ?? null,
     costoTotalCalculado: calculateTotalCost(cotizacion),
     ...amounts,
   };
@@ -129,6 +135,14 @@ function validateQuoteBody(body, res) {
   for (const field of QUOTE_NUMERIC_FIELDS) {
     if (toNonNegativeNumber(body[field]) === null) {
       sendError(res, 400, `${field} debe ser un número mayor o igual a 0`);
+      return false;
+    }
+  }
+
+  if (body.porcentajeTransferenciaUsa !== undefined && body.porcentajeTransferenciaUsa !== null) {
+    const porcentaje = Number(body.porcentajeTransferenciaUsa);
+    if (!Number.isFinite(porcentaje) || porcentaje < 0) {
+      sendError(res, 400, 'porcentajeTransferenciaUsa debe ser un número mayor o igual a 0');
       return false;
     }
   }
@@ -190,7 +204,7 @@ export async function createQuoteHandler(req, res) {
     const cotizacion = await findQuoteById(result.insertedId.toString());
 
     return sendSuccess(res, 201, {
-      message: 'Cotización creada correctamente',
+      message: 'cotización creada correctamente',
       cotizacion: mapQuoteResponse(cotizacion, cliente),
     });
   } catch (error) {
@@ -206,14 +220,14 @@ export async function updateQuoteItem(req, res) {
   try {
     const quoteId = normalizeQuoteId(req.params.quoteId);
     if (!quoteId) {
-      return sendError(res, 400, 'Identificador de cotización inválido');
+      return sendError(res, 400, 'Identificador de cotización inv?lido');
     }
 
     if (!validateQuoteBody(req.body, res)) return;
 
     const cotizacion = await updateQuoteById(quoteId, req.body);
     if (!cotizacion) {
-      return sendError(res, 404, 'Cotización no encontrada');
+      return sendError(res, 404, 'cotización no encontrada');
     }
 
     const cliente = cotizacion.clienteId
@@ -221,7 +235,7 @@ export async function updateQuoteItem(req, res) {
       : null;
 
     return sendSuccess(res, 200, {
-      message: 'Cotización actualizada correctamente',
+      message: 'cotización actualizada correctamente',
       cotizacion: mapQuoteResponse(cotizacion, cliente),
     });
   } catch (error) {
@@ -237,12 +251,12 @@ export async function getQuoteById(req, res) {
   try {
     const quoteId = normalizeQuoteId(req.params.quoteId);
     if (!quoteId) {
-      return sendError(res, 400, 'Identificador de cotización inválido');
+      return sendError(res, 400, 'Identificador de cotización inv?lido');
     }
 
     const cotizacion = await findQuoteById(quoteId);
     if (!cotizacion) {
-      return sendError(res, 404, 'Cotización no encontrada');
+      return sendError(res, 404, 'cotización no encontrada');
     }
 
     const cliente = cotizacion.clienteId
@@ -257,7 +271,7 @@ export async function getQuoteById(req, res) {
 
 /**
  * Guarda o actualiza la cotización detallada de un cliente.
- * @param {import('express').Request} req - Petición con clientId en la URL y datos de cotización en el body.
+ * @param {import('express').Request} req - Petici?n con clientId en la URL y datos de cotización en el body.
  * @param {import('express').Response} res - Respuesta HTTP.
  * @returns {Promise<import('express').Response>}
  */
@@ -291,7 +305,7 @@ export async function saveQuote(req, res) {
     const costoTotalCalculado = calculateTotalCost(cotizacion);
 
     return sendSuccess(res, 200, {
-      message: 'Cotización guardada correctamente',
+      message: 'cotización guardada correctamente',
       cotizacion: formatQuoteDocument(cotizacion),
       costoTotalCalculado,
     });
@@ -303,7 +317,7 @@ export async function saveQuote(req, res) {
 
 /**
  * Obtiene el desglose de costos y el total calculado de la importación de un cliente.
- * @param {import('express').Request} req - Petición con clientId en los parámetros de la URL.
+ * @param {import('express').Request} req - Petici?n con clientId en los par?metros de la URL.
  * @param {import('express').Response} res - Respuesta HTTP.
  * @returns {Promise<import('express').Response>}
  */
@@ -322,7 +336,7 @@ export async function getQuoteByClient(req, res) {
 
     const cotizacion = await findQuoteByClientId(clientId);
     if (!cotizacion) {
-      return sendError(res, 404, 'Cotización no encontrada para este cliente');
+      return sendError(res, 404, 'cotización no encontrada para este cliente');
     }
 
     const costoTotalCalculado = calculateTotalCost(cotizacion);
@@ -345,12 +359,12 @@ export async function linkQuoteToClientHandler(req, res) {
     const quoteId = normalizeQuoteId(req.params.quoteId);
     const clientId = normalizeClientId(req.body.clienteId);
 
-    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inválido');
+    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inv?lido');
     if (!clientId) return sendError(res, 400, 'Identificador de cliente inválido');
 
     const cotizacion = await findQuoteById(quoteId);
     if (!cotizacion || cotizacion.archivada) {
-      return sendError(res, 404, 'Cotización no encontrada');
+      return sendError(res, 404, 'cotización no encontrada');
     }
 
     const cliente = await findClientById(clientId);
@@ -365,7 +379,7 @@ export async function linkQuoteToClientHandler(req, res) {
 
     const updated = await linkQuoteToClient(quoteId, clientId);
     return sendSuccess(res, 200, {
-      message: 'Cotización vinculada al cliente',
+      message: 'cotización vinculada al cliente',
       cotizacion: mapQuoteResponse(updated, cliente),
     });
   } catch (error) {
@@ -380,15 +394,15 @@ export async function linkQuoteToClientHandler(req, res) {
 export async function unlinkQuoteHandler(req, res) {
   try {
     const quoteId = normalizeQuoteId(req.params.quoteId);
-    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inválido');
+    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inv?lido');
 
     const updated = await unlinkQuoteFromClient(quoteId);
     if (!updated) {
-      return sendError(res, 404, 'Cotización no encontrada');
+      return sendError(res, 404, 'cotización no encontrada');
     }
 
     return sendSuccess(res, 200, {
-      message: 'Cotización desvinculada',
+      message: 'cotización desvinculada',
       cotizacion: mapQuoteResponse(updated, null),
     });
   } catch (error) {
@@ -403,15 +417,15 @@ export async function unlinkQuoteHandler(req, res) {
 export async function convertQuoteToClient(req, res) {
   try {
     const quoteId = normalizeQuoteId(req.params.quoteId);
-    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inválido');
+    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inv?lido');
 
     const cotizacion = await findQuoteById(quoteId);
     if (!cotizacion || cotizacion.archivada) {
-      return sendError(res, 404, 'Cotización no encontrada');
+      return sendError(res, 404, 'cotización no encontrada');
     }
 
     if (cotizacion.clienteId) {
-      return sendError(res, 409, 'Esta cotización ya está vinculada a un cliente');
+      return sendError(res, 409, 'Esta cotización ya est? vinculada a un cliente');
     }
 
     const {
@@ -428,7 +442,7 @@ export async function convertQuoteToClient(req, res) {
     }
 
     if (estadoAuto && !['USA', 'CHILE', 'ADUANA_BOLIVIA', 'BOLIVIA', 'TALLER'].includes(estadoAuto)) {
-      return sendError(res, 400, 'Estado del vehículo inválido');
+      return sendError(res, 400, 'Estado del vehículo inv?lido');
     }
 
     const costoTotalPactado = calculateTotalCost(cotizacion);
@@ -478,17 +492,17 @@ export async function convertQuoteToClient(req, res) {
 export async function archiveQuote(req, res) {
   try {
     const quoteId = normalizeQuoteId(req.params.quoteId);
-    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inválido');
+    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inv?lido');
 
     const archived = await archiveQuoteById(quoteId, req.body?.motivo);
-    if (!archived) return sendError(res, 404, 'Cotización no encontrada');
+    if (!archived) return sendError(res, 404, 'cotización no encontrada');
 
     const cliente = archived.clienteId
       ? await findClientById(archived.clienteId.toString())
       : null;
 
     return sendSuccess(res, 200, {
-      message: 'Cotización archivada',
+      message: 'cotización archivada',
       cotizacion: mapQuoteResponse(archived, cliente),
     });
   } catch (error) {
@@ -503,17 +517,17 @@ export async function archiveQuote(req, res) {
 export async function restoreQuote(req, res) {
   try {
     const quoteId = normalizeQuoteId(req.params.quoteId);
-    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inválido');
+    if (!quoteId) return sendError(res, 400, 'Identificador de cotización inv?lido');
 
     const restored = await restoreQuoteById(quoteId);
-    if (!restored) return sendError(res, 404, 'Cotización archivada no encontrada');
+    if (!restored) return sendError(res, 404, 'cotización archivada no encontrada');
 
     const cliente = restored.clienteId
       ? await findClientById(restored.clienteId.toString())
       : null;
 
     return sendSuccess(res, 200, {
-      message: 'Cotización restaurada',
+      message: 'cotización restaurada',
       cotizacion: mapQuoteResponse(restored, cliente),
     });
   } catch (error) {
