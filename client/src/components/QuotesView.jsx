@@ -654,24 +654,26 @@ function QuoteDetailModal({ quote, onClose, onEdit, onDownload, onConvert, tipoC
           />
         </div>
 
-        <div className="flex flex-col-reverse gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:justify-end">
-          <button type="button" onClick={onClose} className="app-btn-secondary min-h-11">
-            Cerrar
-          </button>
-          {!quote.clienteId && onConvert && (
-            <button type="button" onClick={onConvert} className="app-btn-secondary min-h-11 gap-2">
-              <UserPlus className="h-4 w-4" />
-              Convertir en cliente
-            </button>
-          )}
-          <button type="button" onClick={onDownload} className="app-btn-secondary min-h-11 gap-2">
-            <Download className="h-4 w-4" />
-            PDF
-          </button>
-          <button type="button" onClick={onEdit} className="app-btn-block sm:min-w-[140px]">
+        <div className="space-y-3 border-t border-slate-200 px-5 py-4">
+          <button type="button" onClick={onEdit} className="app-btn-block inline-flex w-full items-center justify-center gap-2">
             <Pencil className="h-4 w-4" />
             Editar
           </button>
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
+            <button type="button" onClick={onDownload} className="app-btn-secondary inline-flex min-h-11 items-center justify-center gap-2 px-4">
+              <Download className="h-4 w-4" />
+              Descargar PDF
+            </button>
+            {!quote.clienteId && onConvert && (
+              <button type="button" onClick={onConvert} className="app-btn-secondary inline-flex min-h-11 items-center justify-center gap-2 px-4">
+                <UserPlus className="h-4 w-4" />
+                Convertir en cliente
+              </button>
+            )}
+            <button type="button" onClick={onClose} className="app-btn-secondary inline-flex min-h-11 items-center justify-center px-4">
+              Cerrar
+            </button>
+          </div>
         </div>
       </div>
     </div>
